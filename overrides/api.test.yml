@@ -1,0 +1,13 @@
+# Copyright (c) 2026 CoverIt Labs. All Rights Reserved.
+# Proprietary and confidential. Unauthorized use is strictly prohibited.
+# See LICENSE file in the project root for full license information.
+
+# Build override — builds the production Dockerfile locally.
+# Always layered on top of api.cloud.yml:
+#   docker compose -f docker-compose.yml -f overrides/api.cloud.yml -f overrides/api.test.yml
+
+services:
+  api:
+    image: coverit-api-test-local
+    build:
+      dockerfile: Dockerfile

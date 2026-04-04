@@ -1,0 +1,19 @@
+# Copyright (c) 2026 CoverIt Labs. All Rights Reserved.
+# Proprietary and confidential. Unauthorized use is strictly prohibited.
+# See LICENSE file in the project root for full license information.
+
+# Modular override for API development with hot-reload
+# Inherits JWT_ACCESS_EXPIRY, JWT_REFRESH_EXPIRY_SECONDS, RESET_TOKEN_TTL_SECONDS,
+# REDIS_URL, and CORS_ORIGINS from the base docker-compose.yml.
+
+services:
+  api:
+    image: coverit-api-dev-local
+    build:
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ${API_DIR}/src:/app/src
+      - ${API_DIR}/prisma:/app/prisma
+      - ${API_DIR}/prisma.config.ts:/app/prisma.config.ts
+      - ${API_DIR}/nodemon.json:/app/nodemon.json
+      - ${API_DIR}/tsconfig.json:/app/tsconfig.json
