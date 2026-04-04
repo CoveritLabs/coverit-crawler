@@ -1,0 +1,33 @@
+# Copyright (c) 2026 CoverIt Labs. All Rights Reserved.
+# Proprietary and confidential. Unauthorized use is strictly prohibited.
+# See LICENSE file in the project root for full license information.
+
+name: Tests
+
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".github/**"
+      - ".husky/**"
+      - ".vscode/**"
+  pull_request:
+    branches: [main, develop]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".github/**"
+      - ".husky/**"
+      - ".vscode/**"
+
+permissions:
+  contents: read
+  packages: read
+  pull-requests: write
+
+jobs:
+  test:
+    uses: CoveritLabs/.github/.github/workflows/test-and-coverage.yml@main
+    secrets: inherit
