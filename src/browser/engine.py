@@ -6,8 +6,6 @@ from datetime import datetime, timezone
 from ..models.graph import AbstractState
 from playwright.async_api import async_playwright, Browser, Page, BrowserContext
 import hashlib
-import os
-from pathlib import Path
 
 
 class BrowserEngine:
@@ -44,7 +42,7 @@ class BrowserEngine:
         """Navigate to URL."""
         if not self.page:
             raise RuntimeError("Browser not started")
-        await self.page.goto(url, wait_until="domcontentloaded")
+        await self.page.goto(url, wait_until="networkidle")
 
     async def get_page_title(self) -> str:
         """Get current page title."""
@@ -148,7 +146,7 @@ class BrowserEngine:
         """Wait for page navigation."""
         if not self.page:
             raise RuntimeError("Browser not started")
-        await self.page.wait_for_load_state("domcontentloaded")
+        await self.page.wait_for_load_state("networkidle")
 
     async def take_screenshot(self, path: str) -> None:
         """Take screenshot of current page."""

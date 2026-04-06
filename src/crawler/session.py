@@ -127,7 +127,7 @@ class CrawlSessionManager:
                 logger.debug(f"Found {len(elements)} interactable elements on {current.url}")
 
                 # limit elements per state for now
-                for element in elements[:2]: 
+                for element in elements[:5]: 
                     if self.session.transition_count >= max_transitions:
                         break
 
