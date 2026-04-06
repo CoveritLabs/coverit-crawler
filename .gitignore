@@ -35,4 +35,5 @@ coverage
 .env
 .env.*
 
+**/__pycache__/
 /src/generated/prisma

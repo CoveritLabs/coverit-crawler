@@ -10,13 +10,6 @@ def normalize_url(url: str) -> str:
     return url
 
 
-def hash_state_content(content: str) -> str:
-    """Generate state hash from normalized content."""
-    normalized = content
-    normalized = normalized.replace("\n", "").replace("\t", "")
-    return hashlib.md5(normalized.encode()).hexdigest()
-
-
 def extract_selector_id(element) -> str:
     """Extract a unique selector from an element."""
     if hasattr(element, "get_attribute"):

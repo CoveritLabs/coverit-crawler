@@ -1,8 +1,13 @@
 """Playwright-based browser engine for crawling."""
 
+import re
 from typing import Optional, Dict, Any, List
+from datetime import datetime, timezone
+from ..models.graph import AbstractState
 from playwright.async_api import async_playwright, Browser, Page, BrowserContext
 import hashlib
+import os
+from pathlib import Path
 
 
 class BrowserEngine:
@@ -22,6 +27,8 @@ class BrowserEngine:
         self.browser = await self.playwright.chromium.launch(headless=self.headless)
         self.context = await self.browser.new_context()
         self.page = await self.context.new_page()
+        # will probably change it, but for now it closes any new page that opens
+        self.context.on("page", lambda page: page.close())
         self.page.set_default_timeout(self.timeout_ms)
 
     async def stop(self) -> None:
@@ -37,7 +44,7 @@ class BrowserEngine:
         """Navigate to URL."""
         if not self.page:
             raise RuntimeError("Browser not started")
-        await self.page.goto(url, wait_until="networkidle")
+        await self.page.goto(url, wait_until="domcontentloaded")
 
     async def get_page_title(self) -> str:
         """Get current page title."""
@@ -69,10 +76,37 @@ class BrowserEngine:
             raise RuntimeError("Browser not started")
         return await self.page.content()
 
+    # async def get_state_hash(self) -> str:
+    #     """Generate hash of normalized page state."""
+    #     content = await self.get_page_content()
+    #     normalized = content.replace("\n", "").replace("\t", "")
+    #     return hashlib.md5(normalized.encode()).hexdigest()
+    
     async def get_state_hash(self) -> str:
-        """Generate hash of normalized page state."""
-        content = await self.get_page_content()
-        normalized = content.replace("\n", "").replace("\t", "")
+        """Generate hash of page state."""
+    
+        # semantic content for now
+        semantic_content = await self.page.evaluate("""() => {
+            const body = document.body.cloneNode(true);
+
+            const trackerTags = body.querySelectorAll('script, style, meta, noscript, link, iframe, svg');
+            trackerTags.forEach(tag => tag.remove());
+
+            let text = body.innerText || "";
+            
+            const interactives = Array.from(body.querySelectorAll('button, a, input'))
+                .map(el => {
+                    const key = (el.name || '') + '|' + (el.type || '') + '|' + (el.placeholder || '');
+                    return key.length > 2 ? key : '';  
+                })
+                .filter(key => key)
+                .sort()  
+                .join('|');
+
+            return text + ':::' + interactives; 
+        }""")
+
+        normalized = re.sub(r'\W+', '', semantic_content)
         return hashlib.md5(normalized.encode()).hexdigest()
 
     async def get_interactable_elements(self) -> List[Dict[str, Any]]:
@@ -114,10 +148,34 @@ class BrowserEngine:
         """Wait for page navigation."""
         if not self.page:
             raise RuntimeError("Browser not started")
-        await self.page.wait_for_load_state("networkidle")
+        await self.page.wait_for_load_state("domcontentloaded")
 
     async def take_screenshot(self, path: str) -> None:
         """Take screenshot of current page."""
         if not self.page:
             raise RuntimeError("Browser not started")
         await self.page.screenshot(path=path)
+
+    async def capture_state(self) -> AbstractState:
+        """Capture current page state."""
+        state_hash = await self.get_state_hash()
+        url = await self.get_current_url()
+        title = await self.get_page_title()
+        content = await self.get_page_content()
+        interactable = await self.get_interactable_elements()
+
+        state = AbstractState(
+            state_id=state_hash[:8],
+            state_hash=state_hash,
+            url=url,
+            title=title,
+            dom_snapshot={
+                "content_length": len(content),
+                "element_count": len(interactable),
+            },
+            metadata={
+                "interactable_count": len(interactable),
+                "timestamp": datetime.now(timezone.utc),
+            },
+        )
+        return state

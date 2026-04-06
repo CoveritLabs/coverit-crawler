@@ -49,11 +49,11 @@ class Neo4jGraphBuilder:
         async with self.driver.session() as session:
             await session.run(
                 query,
-                state_id=state.state_id,
+                state_id=str(state.state_id),
                 state_hash=state.state_hash,
                 url=state.url,
                 title=state.title,
-                session_id=crawl_session_id,
+                session_id=str(crawl_session_id),
             )
 
     async def add_transition(
@@ -78,9 +78,9 @@ class Neo4jGraphBuilder:
         async with self.driver.session() as session:
             await session.run(
                 query,
-                source_id=transition.source_state_id,
-                target_id=transition.target_state_id,
-                transition_id=transition.transition_id,
+                source_id=str(transition.source_state_id),
+                target_id=str(transition.target_state_id),
+                transition_id=str(transition.transition_id),
                 action_type=transition.action_type,
                 action_description=transition.action_description,
                 locator_value=transition.locator_value,

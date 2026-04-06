@@ -2,7 +2,6 @@
 
 from typing import List, Optional
 
-from .utils import capture_state
 from ..models.graph import AbstractState, AbstractTransition, CrawlAction
 from ..browser.engine import BrowserEngine
 
@@ -15,7 +14,7 @@ class EventExecutor:
         self.transition_log: List[AbstractTransition] = []
 
     async def execute_action(
-        self, action: CrawlAction, source_state: AbstractState
+        self, action: CrawlAction
     ) -> Optional[AbstractState]:
         """Execute action and capture resulting state."""
         try:
@@ -29,21 +28,6 @@ class EventExecutor:
                 return None
 
             await self.browser.wait_for_navigation()
-
-            target_state = await capture_state(browser=self.browser)
-
-            transition = AbstractTransition(
-                transition_id=f"{source_state.state_id}-{target_state.state_id}",
-                source_state_id=source_state.state_id,
-                target_state_id=target_state.state_id,
-                action_type=action.action_type,
-                action_description=action.description,
-                locator_id=action.action_id,
-                locator_value=action.selector,
-            )
-            self.transition_log.append(transition)
-
-            return target_state
 
         except Exception as e:
             print(f"Error executing action: {e}")
