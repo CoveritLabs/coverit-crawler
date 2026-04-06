@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from uuid import UUID
 import logging
 
-from .utils import capture_state
 from ..models.domain import CrawlSession
 from ..models.graph import AbstractState, AbstractTransition, CrawlAction
 from ..browser.engine import BrowserEngine
@@ -71,12 +70,14 @@ class CrawlSessionManager:
         )
         logger.error(f"Crawl session {self.session.crawl_session_id} failed")
 
-    def add_to_queue(self, state: AbstractState) -> None:
+    async def add_to_queue(self, state: AbstractState) -> None:
         """Add state to discovery queue."""
         if state.state_hash not in self.discovered_states:
             self.discovered_states.add(state.state_hash)
             self.discovery_queue.append(state)
             self.session.state_count += 1
+
+            await self.graph_builder.add_state(self.session.crawl_session_id, state)
             logger.debug(f"Added state {state.state_id} to queue (total: {self.session.state_count})")
 
     def get_next_state(self) -> Optional[AbstractState]:
@@ -89,6 +90,8 @@ class CrawlSessionManager:
         """Add transition to graph."""
         self.session.transition_count += 1
         await self.graph_builder.add_transition(transition)
+        self.executor.get_transition_log().append(transition)
+
         logger.debug(f"Recorded transition: {transition.action_type}")
 
     @property
@@ -104,14 +107,14 @@ class CrawlSessionManager:
             logger.info(f"Starting crawl from {self.base_url}")
             await self.browser.navigate(self.base_url)
 
-            initial_state = await capture_state(browser=self.browser)
-            self.add_to_queue(initial_state)
+            initial_state = await self.browser.capture_state()
+            await self.add_to_queue(initial_state)
             logger.info(f"Initial state captured: {initial_state.state_id}")
 
             while not self.is_complete and self.session.state_count < max_states and self.session.transition_count < max_transitions:
                 current = self.get_next_state()
                 if not current:
-                    logger.debug("No more states to explore.", self.discovery_queue)
+                    logger.info("No more states to explore.", self.discovery_queue)
                     break
 
                 logger.info(f"Exploring state {current.state_id} ({self.session.state_count}/{max_states})")
@@ -123,11 +126,13 @@ class CrawlSessionManager:
                 elements = await self.browser.get_interactable_elements()
                 logger.debug(f"Found {len(elements)} interactable elements on {current.url}")
 
-                # 5 elements per state for now
-                for element in elements[:5]: 
+                # limit elements per state for now
+                for element in elements[:2]: 
                     if self.session.transition_count >= max_transitions:
                         break
 
+                    if current.url != await self.browser.get_current_url():
+                        await self.browser.navigate(current.url)
                     try:
                         selector = self._get_selector_for_element(element)
                         if not selector:
@@ -142,7 +147,8 @@ class CrawlSessionManager:
                             description=f"Click {element.get('tag')} with text '{element.get('text')}'",
                         )
 
-                        new_state = await self.executor.execute_action(action, current)
+                        await self.executor.execute_action(action)
+                        new_state = await self.browser.capture_state()
 
                         if new_state:
                             transition = AbstractTransition(
@@ -154,9 +160,9 @@ class CrawlSessionManager:
                                 locator_id=action.action_id,
                                 locator_value=selector,
                             )
+                            await self.add_to_queue(new_state)
                             await self.add_transition(transition)
 
-                            self.add_to_queue(new_state)
                             logger.info(f"Discovered new state: {new_state.state_id}")
                         else:
                             logger.warning(f"Failed to execute action on {selector}")
