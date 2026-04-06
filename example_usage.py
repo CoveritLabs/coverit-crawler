@@ -11,8 +11,9 @@ from src.crawler.session import CrawlSessionManager
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://the-internet.herokuapp.com/"
+BASE_URL = "https://quotes.toscrape.com/"
 OTHER_URL = "https://en.wikipedia.org/wiki/Main_Page"
+X = "https://the-internet.herokuapp.com/"
 
 async def main():
     logger.info("Starting CoverIt Crawler...")
