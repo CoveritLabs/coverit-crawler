@@ -1,38 +1,57 @@
-"""Event execution and state transition logging."""
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
 
-from typing import List, Optional
-
-from ..models.graph import AbstractState, AbstractTransition, CrawlAction
 from ..browser.engine import BrowserEngine
+from ..models.graph import AbstractTransition, CrawlAction
+
+
+@dataclass
+class StateReplayInfo:
+    checkpoint_url: str
+    actions: List[CrawlAction] = field(default_factory=list)
 
 
 class EventExecutor:
-    """Executes actions and logs state transitions."""
-
     def __init__(self, browser: BrowserEngine):
-        self.browser = browser
-        self.transition_log: List[AbstractTransition] = []
+        self._browser = browser
+        self._transition_log: List[AbstractTransition] = []
 
-    async def execute_action(
-        self, action: CrawlAction
-    ) -> Optional[AbstractState]:
-        """Execute action and capture resulting state."""
+    async def execute_action(self, action: CrawlAction) -> None:
         try:
             if action.action_type == "click":
-                await self.browser.click(action.selector)
+                await self._browser.click(action.selector)
             elif action.action_type == "type":
-                await self.browser.type_text(action.selector, action.value)
+                await self._browser.type_text(action.selector, action.value)
             elif action.action_type == "navigate":
-                await self.browser.navigate(action.value)
-            else:
-                return None
-
-            await self.browser.wait_for_navigation()
-
+                await self._browser.navigate(action.value)
         except Exception as e:
-            print(f"Error executing action: {e}")
-            return None
+            raise RuntimeError(f"Failed to execute {action.action_type} on {action.selector}: {e}") from e
+
+    def log_transition(self, transition: AbstractTransition) -> None:
+        self._transition_log.append(transition)
 
     def get_transition_log(self) -> List[AbstractTransition]:
-        """Get log of all transitions."""
-        return self.transition_log.copy()
+        return self._transition_log
+
+
+class StateReplayer:
+    def __init__(self, browser: BrowserEngine, executor: EventExecutor):
+        self._browser = browser
+        self._executor = executor
+        self._replay_map: Dict[str, StateReplayInfo] = {}
+
+    def register(self, state_id: str, info: StateReplayInfo) -> None:
+        self._replay_map[state_id] = info
+
+    def get_info(self, state_id: str) -> Optional[StateReplayInfo]:
+        return self._replay_map.get(state_id)
+
+    async def replay_to(self, state_id: str) -> None:
+        info = self._replay_map.get(state_id)
+        if not info:
+            return
+        
+        await self._browser.navigate(info.checkpoint_url)
+        for action in info.actions:
+            await self._executor.execute_action(action)
+            await self._browser.wait_for_navigation()
