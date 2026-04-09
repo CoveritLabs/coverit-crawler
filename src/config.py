@@ -19,6 +19,8 @@ class Config:
     HEADLESS: bool = os.getenv("HEADLESS", "true").lower() == "true"
     TIMEOUT_MS: int = int(os.getenv("TIMEOUT_MS", 30000))
     MAX_STATES: int = int(os.getenv("MAX_STATES", 1000))
+    
+    PAGE_LOAD_STATE: str = os.getenv("PAGE_LOAD_STATE", "networkidle")
 
     @property
     def pg_connection_string(self) -> str:

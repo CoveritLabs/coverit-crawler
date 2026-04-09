@@ -11,9 +11,9 @@ from src.crawler.session import CrawlSessionManager
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://the-internet.herokuapp.com/"
+BASE_URL = "https://quotes.toscrape.com/"
 OTHER_URL = "https://en.wikipedia.org/wiki/Main_Page"
-X = "https://quotes.toscrape.com/"
+X = "https://the-internet.herokuapp.com/add_remove_elements/"
 
 async def main():
     logger.info("Starting CoverIt Crawler...")
@@ -82,7 +82,7 @@ async def main():
             logger.info(f"Created crawl session: {crawl_session.crawl_session_id}")
 
             logger.info("Starting crawl...")
-            await manager.run_crawl(max_states=50, max_transitions=200)
+            await manager.run_crawl(max_states=20, max_transitions=200)
 
             logger.info("\nCrawler execution successful!")
 
