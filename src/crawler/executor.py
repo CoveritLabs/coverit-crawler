@@ -1,5 +1,4 @@
 import re
-import os
 import json
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
@@ -17,17 +16,14 @@ class InputValueResolver:
     def __init__(
         self, 
         config_path: Optional[str] = None, 
-        user_overrides: Optional[Dict[str, str]] = None
     ):
         self._config = self._load_config(config_path)
-        
-        self._user_overrides = user_overrides or {}
 
     def _load_config(self, path: Optional[str]) -> Dict[str, Any]:
         if not path:
             return {"field_patterns": {}, "type_fallbacks": {}}
         
-        with open(os.path.join(os.path.dirname(__file__), path), 'r') as f:
+        with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
 
     def resolve(self, element: dict) -> str:
@@ -37,10 +33,6 @@ class InputValueResolver:
             element.get("placeholder", ""),
             element.get("label", ""),
         ]
-
-        for key in hint_keys:
-            if key and key in self._user_overrides:
-                return self._user_overrides[key]
 
         patterns = self._config.get("field_patterns", {})
         for key in hint_keys:
@@ -55,10 +47,9 @@ class InputValueResolver:
         return fallbacks.get(element.get("type", "text"), "test")
 
 class EventExecutor:
-    def __init__(self, browser: BrowserEngine):
+    def __init__(self, browser: BrowserEngine, config_path: Optional[str] = None):
         self._browser = browser
-        # TODO: make resolver accept qa inputs
-        self._resolver = InputValueResolver(config_path="input_defaults.json")
+        self._resolver = InputValueResolver(config_path=config_path)
         self._transition_log: List[AbstractTransition] = []
 
     async def execute_action(self, action: CrawlAction) -> None:
@@ -72,10 +63,16 @@ class EventExecutor:
                     await self._browser.select_option(action.selector, action.value)
                 case "navigate":
                     await self._browser.navigate(action.value)
+                case _:
+                    raise ValueError(f"Unknown action type: {action.action_type}")
         except Exception as e:
-            raise RuntimeError(f"Failed to execute {action.action_type} on {action.selector}: {e}") from e
+            target = action.selector or action.value
+            raise RuntimeError(
+                f"Failed to execute {action.action_type} on {target}: {e}"
+            ) from e
 
     async def fill_and_submit_form(self, form: dict) -> Optional[CrawlAction]:
+        did_interact = False
         for field_el in form.get("fields", []):
             tag = field_el.get("tag", "")
             field_type = field_el.get("type", "")
@@ -87,6 +84,7 @@ class EventExecutor:
             if tag == "select":
                 options = [o for o in field_el.get("options", []) if o.get("value")]
                 if options:
+                    did_interact = True
                     await self.execute_action(CrawlAction(
                         action_id=f"select-{selector}",
                         action_type="select",
@@ -97,6 +95,7 @@ class EventExecutor:
 
             elif tag in ("input", "textarea") and field_type not in ("checkbox", "radio"):
                 value = self._resolver.resolve(field_el)
+                did_interact = True
                 await self.execute_action(CrawlAction(
                     action_id=f"type-{selector}",
                     action_type="type",
@@ -106,6 +105,7 @@ class EventExecutor:
                 ))
 
             elif field_type == "checkbox" and not field_el.get("checked"):
+                did_interact = True
                 await self.execute_action(CrawlAction(
                     action_id=f"check-{selector}",
                     action_type="click",
@@ -115,6 +115,10 @@ class EventExecutor:
 
         submit = form.get("submit")
         if not submit or not submit.get("selector"):
+            return None
+
+        method = str(form.get("method", "")).lower()
+        if not did_interact and method in ("", "get"):
             return None
 
         submit_action = CrawlAction(
@@ -139,14 +143,14 @@ class StateReplayer:
         self._executor = executor
         self._replay_map: Dict[str, StateReplayInfo] = {}
 
-    def register(self, state_id: str, info: StateReplayInfo) -> None:
-        self._replay_map[state_id] = info
+    def register(self, state_hash: str, info: StateReplayInfo) -> None:
+        self._replay_map[state_hash] = info
 
-    def get_info(self, state_id: str) -> Optional[StateReplayInfo]:
-        return self._replay_map.get(state_id)
+    def get_info(self, state_hash: str) -> Optional[StateReplayInfo]:
+        return self._replay_map.get(state_hash)
 
-    async def replay_to(self, state_id: str) -> None:
-        info = self._replay_map.get(state_id)
+    async def replay_to(self, state_hash: str) -> None:
+        info = self._replay_map.get(state_hash)
         if not info:
             return
         

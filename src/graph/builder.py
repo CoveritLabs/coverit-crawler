@@ -36,7 +36,6 @@ class Neo4jGraphBuilder:
 
         query = """
         CREATE (s:State {
-            state_id: $state_id,
             state_hash: $state_hash,
             url: $url,
             title: $title,
@@ -49,7 +48,6 @@ class Neo4jGraphBuilder:
         async with self.driver.session() as session:
             await session.run(
                 query,
-                state_id=str(state.state_id),
                 state_hash=state.state_hash,
                 url=state.url,
                 title=state.title,
@@ -64,8 +62,8 @@ class Neo4jGraphBuilder:
             raise RuntimeError("Neo4j driver not initialized")
 
         query = """
-        MATCH (source:State {state_id: $source_id})
-        MATCH (target:State {state_id: $target_id})
+        MATCH (source:State {state_hash: $source_hash})
+        MATCH (target:State {state_hash: $target_hash})
         CREATE (source)-[t:TRANSITION {
             transition_id: $transition_id,
             action_type: $action_type,
@@ -78,8 +76,8 @@ class Neo4jGraphBuilder:
         async with self.driver.session() as session:
             await session.run(
                 query,
-                source_id=str(transition.source_state_id),
-                target_id=str(transition.target_state_id),
+                source_hash=str(transition.source_state_hash),
+                target_hash=str(transition.target_state_hash),
                 transition_id=str(transition.transition_id),
                 action_type=transition.action_type,
                 action_description=transition.action_description,
@@ -100,8 +98,8 @@ class Neo4jGraphBuilder:
             states: collect(DISTINCT s),
             transitions: collect(DISTINCT {
                 transition_id: t.transition_id,
-                source_id: s.state_id,
-                target_id: target.state_id,
+                source_hash: s.state_hash,
+                target_hash: target.state_hash,
                 action_type: t.action_type
             })
         }
@@ -113,17 +111,17 @@ class Neo4jGraphBuilder:
             return record.value() if record else {"states": [], "transitions": []}
 
     async def get_available_actions(
-        self, state_id: str
+        self, state_hash: str
     ) -> List[Dict]:
         """Get available actions/transitions from a state."""
         if not self.driver:
             raise RuntimeError("Neo4j driver not initialized")
 
         query = """
-        MATCH (s:State {state_id: $state_id})-[t:TRANSITION]->(target:State)
+        MATCH (s:State {state_hash: $state_hash})-[t:TRANSITION]->(target:State)
         RETURN {
             transition_id: t.transition_id,
-            target_state_id: target.state_id,
+            target_state_hash: target.state_hash,
             action_type: t.action_type,
             action_description: t.action_description,
             locator_value: t.locator_value
@@ -131,7 +129,7 @@ class Neo4jGraphBuilder:
         """
 
         async with self.driver.session() as session:
-            result = await session.run(query, state_id=state_id)
+            result = await session.run(query, state_hash=state_hash)
             records = await result.fetch(100)
             return [record.value() for record in records]
 
