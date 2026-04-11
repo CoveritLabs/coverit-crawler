@@ -235,7 +235,7 @@ class CrawlSession:
             self._deferred_work.append(DeferredWorkItem(source_state=current, actions=actions, element=form.get("submit")))
             return
 
-        await self._execute_action_sequence(current, current_info, actions, element=form.get("submit"))
+        await self._execute_action_sequence(current, current_info, actions)
 
     async def _process_element(self, element: dict, current: AbstractState, current_info: StateReplayInfo) -> None:
         selector = self.browser.get_selector_for_element(element)
@@ -250,7 +250,7 @@ class CrawlSession:
             if config.DEFER_DESTRUCTIVE_ACTIONS and self._risk.is_risky(primary, element=element):
                 self._deferred_work.append(DeferredWorkItem(source_state=current, actions=actions, element=element))
                 continue
-            await self._execute_action_sequence(current, current_info, actions, element=element)
+            await self._execute_action_sequence(current, current_info, actions)
             if self.replayer:
                 try:
                     await self.replayer.replay_to(current.state_hash)
@@ -358,8 +358,6 @@ class CrawlSession:
         source: AbstractState,
         source_info: StateReplayInfo,
         actions: List[CrawlAction],
-        *,
-        element: Optional[dict] = None,
     ) -> None:
         if not self.executor or not self.replayer:
             return
@@ -468,4 +466,4 @@ class CrawlSession:
         if not source_info:
             return
 
-        await self._execute_action_sequence(item.source_state, source_info, item.actions, element=item.element)
+        await self._execute_action_sequence(item.source_state, source_info, item.actions)
