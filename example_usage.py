@@ -10,7 +10,7 @@ from src.crawler.session import CrawlSession
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://the-internet.herokuapp.com/"
+BASE_URL = "https://quotes.toscrape.com/"
 QUOTES = "https://quotes.toscrape.com/"
 OTHER_URL = "https://en.wikipedia.org/wiki/Main_Page"
 X = "https://the-internet.herokuapp.com/add_remove_elements/"
@@ -25,13 +25,13 @@ async def main():
 
     try:
         crawl_session_id = str(uuid.uuid4())
-        config_path = os.path.join(os.path.dirname(__file__), "input_defaults.json") 
+        config_path = os.path.join(os.path.dirname(__file__), "input_defaults.json")
         session = CrawlSession(
             base_url=BASE_URL,
             graph_builder=graph_builder,
-            config_path = config_path,
-            session_id = crawl_session_id,
-            headless=False,  
+            config_path=config_path,
+            session_id=crawl_session_id,
+            headless=False,
         )
 
         logger.info("Starting crawl...")

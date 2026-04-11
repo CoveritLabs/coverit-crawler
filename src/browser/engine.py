@@ -5,7 +5,7 @@ from src.utils import read_file
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
-from src.config import config
+from src.config import Config, config
 
 from playwright.async_api import (
     Browser,
@@ -21,10 +21,11 @@ from ..models.graph import AbstractState
 
 
 class BrowserEngine:
-    def __init__(self, headless: bool = True, timeout_ms: int = config.TIMEOUT_MS):
+    def __init__(self, headless: bool = True, timeout_ms: Optional[int] = None, settings: Config = config):
+        self._settings = settings
         self.headless = headless
-        self.timeout_ms = timeout_ms
-        self.page_load_state = config.PAGE_LOAD_STATE
+        self.timeout_ms = int(timeout_ms if timeout_ms is not None else settings.TIMEOUT_MS)
+        self.page_load_state = str(getattr(settings, "PAGE_LOAD_STATE", "networkidle") or "networkidle")
         self.js_dir_path = os.path.join(os.path.dirname(__file__), "js")
         self._js_cache: Dict[str, str] = {}
         self.browser: Optional[Browser] = None
@@ -109,13 +110,13 @@ class BrowserEngine:
     ) -> None:
         target = self._resolve_frame(frame_url=frame_url, frame_name=frame_name) or self._require_page()
         last_error: Optional[Exception] = None
-        for attempt in range(config.ACTION_RETRY_COUNT + 1):
+        for attempt in range(self._settings.ACTION_RETRY_COUNT + 1):
             try:
                 await target.click(selector, timeout=self.timeout_ms)
                 return
             except (PlaywrightTimeoutError, PlaywrightError) as e:
                 last_error = e
-                if attempt >= config.ACTION_RETRY_COUNT:
+                if attempt >= self._settings.ACTION_RETRY_COUNT:
                     raise
                 try:
                     await self._require_page().wait_for_selector(
@@ -138,13 +139,13 @@ class BrowserEngine:
         target = self._resolve_frame(frame_url=frame_url, frame_name=frame_name) or self._require_page()
         page = self._require_page()
         last_error: Optional[Exception] = None
-        for attempt in range(config.ACTION_RETRY_COUNT + 1):
+        for attempt in range(self._settings.ACTION_RETRY_COUNT + 1):
             try:
                 await target.fill(selector, text, timeout=self.timeout_ms)
                 return
             except (PlaywrightTimeoutError, PlaywrightError) as e:
                 last_error = e
-                if attempt >= config.ACTION_RETRY_COUNT:
+                if attempt >= self._settings.ACTION_RETRY_COUNT:
                     break
                 try:
                     await self.click(selector, frame_url=frame_url, frame_name=frame_name)
@@ -166,13 +167,13 @@ class BrowserEngine:
     ) -> None:
         target = self._resolve_frame(frame_url=frame_url, frame_name=frame_name) or self._require_page()
         last_error: Optional[Exception] = None
-        for attempt in range(config.ACTION_RETRY_COUNT + 1):
+        for attempt in range(self._settings.ACTION_RETRY_COUNT + 1):
             try:
                 await target.select_option(selector, value, timeout=self.timeout_ms)
                 return
             except (PlaywrightTimeoutError, PlaywrightError) as e:
                 last_error = e
-                if attempt >= config.ACTION_RETRY_COUNT:
+                if attempt >= self._settings.ACTION_RETRY_COUNT:
                     break
                 await self.wait_for_settle(load_state="domcontentloaded")
         if last_error:
@@ -188,13 +189,13 @@ class BrowserEngine:
     ) -> None:
         target = self._resolve_frame(frame_url=frame_url, frame_name=frame_name) or self._require_page()
         last_error: Optional[Exception] = None
-        for attempt in range(config.ACTION_RETRY_COUNT + 1):
+        for attempt in range(self._settings.ACTION_RETRY_COUNT + 1):
             try:
                 await target.press(selector, key, timeout=self.timeout_ms)
                 return
             except (PlaywrightTimeoutError, PlaywrightError) as e:
                 last_error = e
-                if attempt >= config.ACTION_RETRY_COUNT:
+                if attempt >= self._settings.ACTION_RETRY_COUNT:
                     break
                 await self.wait_for_settle(load_state="domcontentloaded")
         if last_error:
@@ -232,30 +233,33 @@ class BrowserEngine:
         except PlaywrightTimeoutError:
             pass
 
-        if not config.USE_DOM_QUIESCENCE:
+        if not self._settings.USE_DOM_QUIESCENCE:
             return
 
         try:
             js_code = self._get_js_code("wait_for_dom_quiescence.js")
             await page.evaluate(
                 js_code,
-                {"quietMs": int(config.DOM_QUIET_MS), "timeoutMs": int(config.DOM_SETTLE_TIMEOUT_MS)},
+                {"quietMs": int(self._settings.DOM_QUIET_MS), "timeoutMs": int(self._settings.DOM_SETTLE_TIMEOUT_MS)},
             )
         except Exception:
             pass
 
-    async def wait_for_new_page(self, timeout_ms: int = config.POPUP_TIMEOUT_MS) -> Optional[Page]:
+    async def wait_for_new_page(self, timeout_ms: Optional[int] = None) -> Optional[Page]:
         context = self._require_context()
+        timeout = int(timeout_ms if timeout_ms is not None else self._settings.POPUP_TIMEOUT_MS)
         try:
-            return await context.wait_for_event("page", timeout=timeout_ms)
+            return await context.wait_for_event("page", timeout=timeout)
         except PlaywrightTimeoutError:
             return None
 
-    async def close_pages_opened_since(self, initial_count: int, timeout_ms: int = config.POPUP_TIMEOUT_MS) -> int:
+    async def close_pages_opened_since(self, initial_count: int, timeout_ms: Optional[int] = None) -> int:
         context = self._require_context()
 
+        timeout = int(timeout_ms if timeout_ms is not None else self._settings.POPUP_TIMEOUT_MS)
+
         if len(context.pages) <= initial_count:
-            await self.wait_for_new_page(timeout_ms=timeout_ms)
+            await self.wait_for_new_page(timeout_ms=timeout)
 
         extra_pages = context.pages[initial_count:]
         for page in extra_pages:
@@ -269,18 +273,20 @@ class BrowserEngine:
         self,
         initial_count: int,
         *,
-        timeout_ms: int = config.POPUP_TIMEOUT_MS,
+        timeout_ms: Optional[int] = None,
     ) -> List[str]:
         context = self._require_context()
 
+        timeout = int(timeout_ms if timeout_ms is not None else self._settings.POPUP_TIMEOUT_MS)
+
         if len(context.pages) <= initial_count:
-            await self.wait_for_new_page(timeout_ms=timeout_ms)
+            await self.wait_for_new_page(timeout_ms=timeout)
 
         extra_pages = context.pages[initial_count:]
         urls: List[str] = []
         for page in extra_pages:
             try:
-                await page.wait_for_load_state("domcontentloaded", timeout=min(timeout_ms, 3000))
+                await page.wait_for_load_state("domcontentloaded", timeout=min(timeout, 3000))
             except Exception:
                 pass
             try:

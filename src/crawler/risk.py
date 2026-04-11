@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from ..config import config
+from ..config import Config, config
 from ..models.graph import CrawlAction
 
 
@@ -10,10 +10,14 @@ class RiskClassifier:
     keywords: tuple[str, ...]
 
     @staticmethod
-    def from_config() -> "RiskClassifier":
-        raw = str(getattr(config, "DESTRUCTIVE_KEYWORDS", "") or "")
+    def from_settings(settings: Config) -> "RiskClassifier":
+        raw = str(getattr(settings, "DESTRUCTIVE_KEYWORDS", "") or "")
         parts = [p.strip().lower() for p in raw.split(",") if p.strip()]
         return RiskClassifier(keywords=tuple(parts))
+
+    @staticmethod
+    def from_config() -> "RiskClassifier":
+        return RiskClassifier.from_settings(config)
 
     def is_risky(self, action: CrawlAction, *, element: Optional[dict] = None) -> bool:
         text_bits: list[str] = [

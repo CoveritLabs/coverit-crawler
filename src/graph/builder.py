@@ -1,8 +1,12 @@
 """Neo4j graph builder for abstract state graph."""
 
+import logging
 from typing import Optional, List, Dict
 from neo4j import AsyncDriver, AsyncGraphDatabase
 from ..models.graph import AbstractState, AbstractTransition, CrawlAction
+
+
+logger = logging.getLogger(__name__)
 
 
 class Neo4jGraphBuilder:
@@ -21,7 +25,7 @@ class Neo4jGraphBuilder:
             result = await session.run("RETURN 1")
             await result.consume()
             await self._ensure_schema(session)
-        print("Connected to Neo4j")
+        logger.info("Connected to Neo4j")
 
     async def _ensure_schema(self, session) -> None:
         statements = [

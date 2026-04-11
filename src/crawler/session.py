@@ -7,11 +7,13 @@ from typing import Deque, Dict, List, Optional, Set
 from uuid import uuid4
 
 from ..browser.engine import BrowserEngine
-from ..config import config
+from ..config import Config, config
 from ..models.graph import AbstractState, AbstractTransition, CrawlAction
+from .action_limits import ActionRepeatLimiter
 from .executor import EventExecutor, StateReplayer, StateReplayInfo
 from .fingerprints import (
     action_attempt_fingerprint,
+    action_key_fingerprint,
     best_effort_action_value,
     transition_fingerprint,
 )
@@ -34,11 +36,16 @@ class CrawlSession:
         graph_builder,
         config_path: Optional[str] = None,
         session_id: Optional[str] = None,
-        headless: bool = False,
+        headless: Optional[bool] = None,
+        *,
+        browser: Optional[BrowserEngine] = None,
+        settings: Config = config,
+        risk_classifier: Optional[RiskClassifier] = None,
     ):
+        self._settings = settings
         self.base_url = base_url
         self.graph_builder = graph_builder
-        self.headless = headless
+        self.headless = settings.HEADLESS if headless is None else headless
         self.config_path = config_path
         self.session_id = session_id or str(uuid4())
 
@@ -47,10 +54,13 @@ class CrawlSession:
         self._deferred_work: Deque[DeferredWorkItem] = deque()
         self._tried_actions_by_state: Dict[str, Set[str]] = {}
         self._seen_transition_ids: Set[str] = set()
-        self._risk = RiskClassifier.from_config()
+        self._risk = risk_classifier or RiskClassifier.from_settings(settings)
         self._login_attempts = 0
+        self._action_repeat_limiter = ActionRepeatLimiter(
+            max_repeats_per_scope=int(getattr(settings, "MAX_ACTION_REPEATS_PER_URL", 2))
+        )
 
-        self.browser = BrowserEngine(headless=headless)
+        self.browser = browser or BrowserEngine(headless=self.headless, settings=settings)
         self.executor: Optional[EventExecutor] = None
         self.replayer: Optional[StateReplayer] = None
         self._max_states: int = 100
@@ -61,7 +71,7 @@ class CrawlSession:
     async def initialize(self) -> None:
         await self.browser.start()
         self.executor = EventExecutor(self.browser, self.config_path)
-        self.replayer = StateReplayer(self.browser, self.executor)
+        self.replayer = StateReplayer(self.browser, self.executor, self._settings)
         logger.info("Crawl session initialized")
 
     async def cleanup(self) -> None:
@@ -95,9 +105,11 @@ class CrawlSession:
     def _within_limits(self) -> bool:
         return self._state_count < self._max_states and self._transition_count < self._max_transitions
 
-    async def run_crawl(self, max_states: int = 100, max_transitions: int = 500) -> None:
-        self._max_states = max_states
-        self._max_transitions = max_transitions
+    async def run_crawl(self, max_states: Optional[int] = None, max_transitions: Optional[int] = None) -> None:
+        max_states_value = int(max_states if max_states is not None else self._settings.MAX_STATES)
+        max_transitions_value = int(max_transitions if max_transitions is not None else 500)
+        self._max_states = max_states_value
+        self._max_transitions = max_transitions_value
         try:
             await self.initialize()
             await self._seed_initial_state()
@@ -108,13 +120,13 @@ class CrawlSession:
                     if current:
                         logger.info(
                             f"Exploring state {current.state_hash} "
-                            f"({self._state_count}/{max_states} states, "
-                            f"{self._transition_count}/{max_transitions} transitions)"
+                            f"({self._state_count}/{max_states_value} states, "
+                            f"{self._transition_count}/{max_transitions_value} transitions)"
                         )
                         await self._explore_state(current)
                     continue
 
-                if config.DEFER_DESTRUCTIVE_ACTIONS and self._deferred_work:
+                if self._settings.DEFER_DESTRUCTIVE_ACTIONS and self._deferred_work:
                     item = self._deferred_work.popleft()
                     await self._run_deferred_item(item)
                     continue
@@ -149,7 +161,7 @@ class CrawlSession:
         logger.info(f"Initial state: {initial_state.state_hash} at {initial_state.url}")
 
     async def _attempt_login_if_needed(self) -> None:
-        if not config.LOGIN_USERNAME or not config.LOGIN_PASSWORD:
+        if not self._settings.LOGIN_USERNAME or not self._settings.LOGIN_PASSWORD:
             return
         if self._login_attempts >= 2:
             return
@@ -164,7 +176,7 @@ class CrawlSession:
         self._login_attempts += 1
         actions = self.executor.plan_form_submission(
             login_form,
-            overrides={"username": config.LOGIN_USERNAME, "password": config.LOGIN_PASSWORD},
+            overrides={"username": self._settings.LOGIN_USERNAME, "password": self._settings.LOGIN_PASSWORD},
         )
         if not actions:
             return
@@ -213,7 +225,7 @@ class CrawlSession:
         elements = await self.browser.get_interactable_elements()
         processed = 0
         for element in elements:
-            if processed >= config.MAX_ELEMENTS_PER_STATE:
+            if processed >= self._settings.MAX_ELEMENTS_PER_STATE:
                 break
             if not self._within_limits():
                 break
@@ -231,7 +243,7 @@ class CrawlSession:
             return
 
         primary = actions[-1]
-        if config.DEFER_DESTRUCTIVE_ACTIONS and self._risk.is_risky(primary, element=form.get("submit")):
+        if self._settings.DEFER_DESTRUCTIVE_ACTIONS and self._risk.is_risky(primary, element=form.get("submit")):
             self._deferred_work.append(DeferredWorkItem(source_state=current, actions=actions, element=form.get("submit")))
             return
 
@@ -247,7 +259,7 @@ class CrawlSession:
             if not self._within_limits():
                 return
             primary = actions[-1]
-            if config.DEFER_DESTRUCTIVE_ACTIONS and self._risk.is_risky(primary, element=element):
+            if self._settings.DEFER_DESTRUCTIVE_ACTIONS and self._risk.is_risky(primary, element=element):
                 self._deferred_work.append(DeferredWorkItem(source_state=current, actions=actions, element=element))
                 continue
             await self._execute_action_sequence(current, current_info, actions)
@@ -271,7 +283,7 @@ class CrawlSession:
                 return True
             return False
 
-        if tag == "a" and not config.CLICK_NON_HTTP_LINKS:
+        if tag == "a" and not self._settings.CLICK_NON_HTTP_LINKS:
             href = str(element.get("href", "") or "")
             if is_non_http_href(href):
                 return False
@@ -286,7 +298,7 @@ class CrawlSession:
         if tag == "select":
             options = [o for o in element.get("options", []) if o.get("value")]
             out: List[List[CrawlAction]] = []
-            for o in options[: config.MAX_SELECT_OPTIONS_PER_ELEMENT]:
+            for o in options[: self._settings.MAX_SELECT_OPTIONS_PER_ELEMENT]:
                 out.append([
                     CrawlAction(
                         action_type="select",
@@ -369,6 +381,14 @@ class CrawlSession:
         primary.metadata["sequence_digest"] = self._sequence_digest(actions)
         primary.metadata["sequence_len"] = len(actions)
 
+        scope_url = str(source_info.checkpoint_url or "")
+        if scope_url.endswith("?"):
+            scope_url = scope_url[:-1]
+        scope_url = scope_url.split("#", 1)[0]
+        action_key = action_key_fingerprint(primary)
+        if not self._action_repeat_limiter.can_run(scope=scope_url, action_key=action_key):
+            return
+
         attempt_fp = action_attempt_fingerprint(source.state_hash, primary)
         tried = self._tried_actions_by_state.setdefault(source.state_hash, set())
         if attempt_fp in tried:
@@ -382,6 +402,8 @@ class CrawlSession:
                 await self.executor.execute_action(action)
 
             await self.browser.wait_for_settle()
+
+            self._action_repeat_limiter.record(scope=scope_url, action_key=action_key)
 
             popup_urls = await self.browser.collect_and_close_pages_opened_since(initial_page_count)
             for url in popup_urls:

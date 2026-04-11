@@ -20,6 +20,18 @@ def action_attempt_fingerprint(source_state_hash: str, action: CrawlAction) -> s
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def action_key_fingerprint(action: CrawlAction) -> str:
+    meta = action.metadata or {}
+    payload = {
+        "action_type": action.action_type,
+        "selector": action.selector,
+        "value": action.value,
+        "sequence_digest": meta.get("sequence_digest"),
+    }
+    raw = _stable_dumps(payload)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
 def transition_fingerprint(
     *,
     session_id: str,

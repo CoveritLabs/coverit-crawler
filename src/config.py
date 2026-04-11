@@ -15,6 +15,8 @@ class Config:
     MAX_ELEMENTS_PER_STATE: int = int(os.getenv("MAX_ELEMENTS_PER_STATE", 5))
     MAX_SELECT_OPTIONS_PER_ELEMENT: int = int(os.getenv("MAX_SELECT_OPTIONS_PER_ELEMENT", 3))
 
+    MAX_ACTION_REPEATS_PER_URL: int = int(os.getenv("MAX_ACTION_REPEATS_PER_URL", 2))
+
     ACTION_RETRY_COUNT: int = int(os.getenv("ACTION_RETRY_COUNT", 2))
     REPLAY_RETRY_COUNT: int = int(os.getenv("REPLAY_RETRY_COUNT", 2))
     POPUP_TIMEOUT_MS: int = int(os.getenv("POPUP_TIMEOUT_MS", 3000))
