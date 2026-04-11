@@ -11,6 +11,7 @@ from playwright.async_api import (
     Browser,
     BrowserContext,
     Error as PlaywrightError,
+    Frame,
     Page,
     TimeoutError as PlaywrightTimeoutError,
     async_playwright,
@@ -40,6 +41,32 @@ class BrowserEngine:
         if not self.page:
             raise RuntimeError("Browser not started")
         return self.page
+
+    def _resolve_frame(
+        self,
+        *,
+        frame_url: Optional[str] = None,
+        frame_name: Optional[str] = None,
+    ) -> Optional[Frame]:
+        page = self._require_page()
+
+        if frame_name:
+            try:
+                frame = page.frame(name=frame_name)
+                if frame:
+                    return frame
+            except Exception:
+                pass
+
+        if frame_url:
+            try:
+                for frame in page.frames:
+                    if frame.url == frame_url or frame.url.startswith(frame_url):
+                        return frame
+            except Exception:
+                return None
+
+        return None
 
     def _get_js_code(self, filename: str) -> str:
         cached = self._js_cache.get(filename)
@@ -73,17 +100,105 @@ class BrowserEngine:
         page = self._require_page()
         await page.go_back(wait_until=self.page_load_state, timeout=self.timeout_ms)
 
-    async def click(self, selector: str) -> None:
-        page = self._require_page()
-        await page.click(selector)
+    async def click(
+        self,
+        selector: str,
+        *,
+        frame_url: Optional[str] = None,
+        frame_name: Optional[str] = None,
+    ) -> None:
+        target = self._resolve_frame(frame_url=frame_url, frame_name=frame_name) or self._require_page()
+        last_error: Optional[Exception] = None
+        for attempt in range(config.ACTION_RETRY_COUNT + 1):
+            try:
+                await target.click(selector, timeout=self.timeout_ms)
+                return
+            except (PlaywrightTimeoutError, PlaywrightError) as e:
+                last_error = e
+                if attempt >= config.ACTION_RETRY_COUNT:
+                    raise
+                try:
+                    await self._require_page().wait_for_selector(
+                        selector, state="visible", timeout=min(self.timeout_ms, 3000)
+                    )
+                except Exception:
+                    pass
+                await self.wait_for_settle(load_state="domcontentloaded")
+        if last_error:
+            raise last_error
 
-    async def type_text(self, selector: str, text: str) -> None:
+    async def type_text(
+        self,
+        selector: str,
+        text: str,
+        *,
+        frame_url: Optional[str] = None,
+        frame_name: Optional[str] = None,
+    ) -> None:
+        target = self._resolve_frame(frame_url=frame_url, frame_name=frame_name) or self._require_page()
         page = self._require_page()
-        await page.fill(selector, text)
+        last_error: Optional[Exception] = None
+        for attempt in range(config.ACTION_RETRY_COUNT + 1):
+            try:
+                await target.fill(selector, text, timeout=self.timeout_ms)
+                return
+            except (PlaywrightTimeoutError, PlaywrightError) as e:
+                last_error = e
+                if attempt >= config.ACTION_RETRY_COUNT:
+                    break
+                try:
+                    await self.click(selector, frame_url=frame_url, frame_name=frame_name)
+                    await page.keyboard.press("Control+A")
+                    await page.keyboard.type(text)
+                    return
+                except Exception:
+                    await self.wait_for_settle(load_state="domcontentloaded")
+        if last_error:
+            raise last_error
 
-    async def select_option(self, selector: str, value: str) -> None:
-        page = self._require_page()
-        await page.select_option(selector, value)
+    async def select_option(
+        self,
+        selector: str,
+        value: str,
+        *,
+        frame_url: Optional[str] = None,
+        frame_name: Optional[str] = None,
+    ) -> None:
+        target = self._resolve_frame(frame_url=frame_url, frame_name=frame_name) or self._require_page()
+        last_error: Optional[Exception] = None
+        for attempt in range(config.ACTION_RETRY_COUNT + 1):
+            try:
+                await target.select_option(selector, value, timeout=self.timeout_ms)
+                return
+            except (PlaywrightTimeoutError, PlaywrightError) as e:
+                last_error = e
+                if attempt >= config.ACTION_RETRY_COUNT:
+                    break
+                await self.wait_for_settle(load_state="domcontentloaded")
+        if last_error:
+            raise last_error
+
+    async def press_key(
+        self,
+        selector: str,
+        key: str,
+        *,
+        frame_url: Optional[str] = None,
+        frame_name: Optional[str] = None,
+    ) -> None:
+        target = self._resolve_frame(frame_url=frame_url, frame_name=frame_name) or self._require_page()
+        last_error: Optional[Exception] = None
+        for attempt in range(config.ACTION_RETRY_COUNT + 1):
+            try:
+                await target.press(selector, key, timeout=self.timeout_ms)
+                return
+            except (PlaywrightTimeoutError, PlaywrightError) as e:
+                last_error = e
+                if attempt >= config.ACTION_RETRY_COUNT:
+                    break
+                await self.wait_for_settle(load_state="domcontentloaded")
+        if last_error:
+            raise last_error
 
     async def get_current_url(self) -> str:
         page = self._require_page()
@@ -101,17 +216,42 @@ class BrowserEngine:
         return await page.content()
 
     async def wait_for_navigation(self) -> None:
-        page = self._require_page()
-        await page.wait_for_load_state(self.page_load_state, timeout=self.timeout_ms)
+        await self.wait_for_settle()
 
-    async def wait_for_new_page(self, timeout_ms: int = 1000) -> Optional[Page]:
+    async def wait_for_settle(
+        self,
+        *,
+        load_state: Optional[str] = None,
+        timeout_ms: Optional[int] = None,
+    ) -> None:
+        page = self._require_page()
+        timeout = timeout_ms or self.timeout_ms
+
+        try:
+            await page.wait_for_load_state(load_state or self.page_load_state, timeout=timeout)
+        except PlaywrightTimeoutError:
+            pass
+
+        if not config.USE_DOM_QUIESCENCE:
+            return
+
+        try:
+            js_code = self._get_js_code("wait_for_dom_quiescence.js")
+            await page.evaluate(
+                js_code,
+                {"quietMs": int(config.DOM_QUIET_MS), "timeoutMs": int(config.DOM_SETTLE_TIMEOUT_MS)},
+            )
+        except Exception:
+            pass
+
+    async def wait_for_new_page(self, timeout_ms: int = config.POPUP_TIMEOUT_MS) -> Optional[Page]:
         context = self._require_context()
         try:
             return await context.wait_for_event("page", timeout=timeout_ms)
         except PlaywrightTimeoutError:
             return None
 
-    async def close_pages_opened_since(self, initial_count: int, timeout_ms: int = 1000) -> int:
+    async def close_pages_opened_since(self, initial_count: int, timeout_ms: int = config.POPUP_TIMEOUT_MS) -> int:
         context = self._require_context()
 
         if len(context.pages) <= initial_count:
@@ -124,6 +264,37 @@ class BrowserEngine:
             except Exception:
                 pass
         return len(extra_pages)
+
+    async def collect_and_close_pages_opened_since(
+        self,
+        initial_count: int,
+        *,
+        timeout_ms: int = config.POPUP_TIMEOUT_MS,
+    ) -> List[str]:
+        context = self._require_context()
+
+        if len(context.pages) <= initial_count:
+            await self.wait_for_new_page(timeout_ms=timeout_ms)
+
+        extra_pages = context.pages[initial_count:]
+        urls: List[str] = []
+        for page in extra_pages:
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=min(timeout_ms, 3000))
+            except Exception:
+                pass
+            try:
+                url = page.url
+                if url:
+                    urls.append(url)
+            except Exception:
+                pass
+            try:
+                await page.close()
+            except Exception:
+                pass
+
+        return urls
 
     async def _evaluate_js(self, js_code: str, *, retries: int = 1) -> Any:
         page = self._require_page()
@@ -152,6 +323,12 @@ class BrowserEngine:
         return self.is_same_domain(url1, url2)
 
     def get_selector_for_element(self, element: dict) -> Optional[str]:
+        candidates = element.get("selector_candidates")
+        if isinstance(candidates, list):
+            for candidate in candidates:
+                if isinstance(candidate, str) and candidate.strip():
+                    return candidate.strip()
+
         tag = element.get("tag", "")
         el_id = element.get("id", "")
         name = element.get("name", "")
@@ -166,7 +343,8 @@ class BrowserEngine:
         if tag == "input" and input_type in ["submit", "button"] and value:
             return f'input[type="{input_type}"][value="{value}"]'
         if tag in ("button", "a") and text:
-            return f'{tag}:has-text("{text[:50]}")'
+            safe_text = text[:50].replace("\\", "\\\\").replace('"', "\\\"")
+            return f'{tag}:has-text("{safe_text}")'
         selector = element.get("selector", "")
         if selector:
             return selector
@@ -177,9 +355,9 @@ class BrowserEngine:
         self._require_page()
         js_code = self._get_js_code("get_state_hash.js")
         semantic_content = await self._evaluate_js(js_code)
-        normalized = re.sub(r'\s+', ' ', semantic_content.lower())
-        normalized = re.sub(r'[^a-z0-9|:]+', '', normalized)
-        return hashlib.md5(normalized.encode()).hexdigest()
+        normalized = re.sub(r"\s+", " ", str(semantic_content).lower()).strip()
+        normalized = re.sub(r"[\u0000-\u001f]+", " ", normalized).strip()
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
     
     async def get_interactable_elements(self) -> List[Dict[str, Any]]:
         self._require_page()
