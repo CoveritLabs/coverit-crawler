@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 
 from ..browser.engine import BrowserEngine
-from ..config import config
+from ..config import Config, config
 from ..models.graph import AbstractTransition, CrawlAction
 
 
@@ -269,9 +269,10 @@ class EventExecutor:
 
 
 class StateReplayer:
-    def __init__(self, browser: BrowserEngine, executor: EventExecutor):
+    def __init__(self, browser: BrowserEngine, executor: EventExecutor, settings: Config = config):
         self._browser = browser
         self._executor = executor
+        self._settings = settings
         self._replay_map: Dict[str, StateReplayInfo] = {}
 
     def register(self, state_hash: str, info: StateReplayInfo) -> None:
@@ -286,7 +287,7 @@ class StateReplayer:
             return False
 
         last_error: Optional[Exception] = None
-        for _ in range(config.REPLAY_RETRY_COUNT + 1):
+        for _ in range(self._settings.REPLAY_RETRY_COUNT + 1):
             try:
                 await self._browser.navigate(info.checkpoint_url)
                 await self._browser.wait_for_settle()
