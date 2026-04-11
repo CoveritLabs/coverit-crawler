@@ -25,6 +25,7 @@ class AbstractState:
 class AbstractTransition:
     """Represents a transition between states."""
 
+    session_id: str = ""
     transition_id: str = ""
     source_state_hash: str = ""
     target_state_hash: str = ""
@@ -32,6 +33,8 @@ class AbstractTransition:
     action_description: str = ""
     locator_id: str = ""
     locator_value: str = ""
+    action_value: str = ""
+    action_fingerprint: str = ""
 
 
 @dataclass
