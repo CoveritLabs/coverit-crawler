@@ -12,7 +12,7 @@ class Config:
     HEADLESS: bool = os.getenv("HEADLESS", "true").lower() == "true"
     TIMEOUT_MS: int = int(os.getenv("TIMEOUT_MS", 30000))
     MAX_STATES: int = int(os.getenv("MAX_STATES", 1000))
-    MAX_ELEMENTS_PER_STATE: int = int(os.getenv("MAX_ELEMENTS_PER_STATE", 25))
+    MAX_ELEMENTS_PER_STATE: int = int(os.getenv("MAX_ELEMENTS_PER_STATE", 5))
     MAX_SELECT_OPTIONS_PER_ELEMENT: int = int(os.getenv("MAX_SELECT_OPTIONS_PER_ELEMENT", 3))
 
     ACTION_RETRY_COUNT: int = int(os.getenv("ACTION_RETRY_COUNT", 2))
