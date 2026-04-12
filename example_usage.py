@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://quotes.toscrape.com/"
 QUOTES = "https://quotes.toscrape.com/"
 OTHER_URL = "https://en.wikipedia.org/wiki/Main_Page"
-X = "https://the-internet.herokuapp.com/add_remove_elements/"
+X = "https://the-internet.herokuapp.com/challenging_dom/"
 
 async def main():
     logger.info("Starting CoverIt Crawler...")

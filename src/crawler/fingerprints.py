@@ -1,12 +1,8 @@
 import hashlib
-import json
 from typing import Any, Dict
 
 from ..models.graph import CrawlAction
-
-
-def _stable_dumps(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+from .serialization import stable_json_dumps
 
 
 def action_attempt_fingerprint(source_state_hash: str, action: CrawlAction) -> str:
@@ -16,7 +12,7 @@ def action_attempt_fingerprint(source_state_hash: str, action: CrawlAction) -> s
         "value": action.value,
         "metadata": action.metadata or {},
     }
-    raw = f"{source_state_hash}|{_stable_dumps(payload)}"
+    raw = f"{source_state_hash}|{stable_json_dumps(payload)}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -28,7 +24,7 @@ def action_key_fingerprint(action: CrawlAction) -> str:
         "value": action.value,
         "sequence_digest": meta.get("sequence_digest"),
     }
-    raw = _stable_dumps(payload)
+    raw = stable_json_dumps(payload)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -48,7 +44,7 @@ def transition_fingerprint(
         "value": action.value,
         "metadata": action.metadata or {},
     }
-    raw = _stable_dumps(payload)
+    raw = stable_json_dumps(payload)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 

@@ -6,12 +6,15 @@ from typing import Dict, List, Optional, Any
 from ..browser.engine import BrowserEngine
 from ..config import Config, config
 from ..models.graph import AbstractTransition, CrawlAction
+from .element_hints import element_display_hint
 
 
 @dataclass
 class StateReplayInfo:
     checkpoint_url: str
     actions: List[CrawlAction] = field(default_factory=list)
+    fallback_checkpoint_url: Optional[str] = None
+    fallback_actions: List[CrawlAction] = field(default_factory=list)
 
 class InputValueResolver:
     def __init__(
@@ -137,6 +140,10 @@ class EventExecutor:
 
         actions: List[CrawlAction] = []
 
+        form_id = str(form.get("form_id", "") or "").strip()
+        form_method = str(form.get("method", "get") or "get").lower()
+        form_action = str(form.get("action", "") or "").strip()
+
         radio_groups: Dict[str, List[dict]] = {}
         for field_el in fields:
             field_type = str(field_el.get("type", "") or "").lower()
@@ -167,12 +174,14 @@ class EventExecutor:
                 options = [o for o in field_el.get("options", []) if o.get("value")]
                 if options:
                     value = str(options[0]["value"])
+                    label_hint = element_display_hint(field_el, label_keys=("label", "aria_label"))
+                    option_text = str(options[0].get("text", value) or value).strip()
                     actions.append(
                         CrawlAction(
                             action_type="select",
                             selector=selector,
                             value=value,
-                            description=f"Select '{options[0].get('text', value)}'",
+                            description=f"Select '{option_text}' for {label_hint or 'select'}",
                             metadata={
                                 "form_id": form.get("form_id"),
                                 "field": field_el.get("name") or field_el.get("id"),
@@ -185,11 +194,12 @@ class EventExecutor:
                 required = bool(field_el.get("required"))
                 checked = bool(field_el.get("checked"))
                 if required and not checked:
+                    label_hint = element_display_hint(field_el, label_keys=("label", "aria_label"))
                     actions.append(
                         CrawlAction(
                             action_type="click",
                             selector=selector,
-                            description="Check required checkbox",
+                            description=f"Check required checkbox {label_hint}".strip(),
                             metadata={
                                 "form_id": form.get("form_id"),
                                 "field": field_el.get("name") or field_el.get("id"),
@@ -200,11 +210,12 @@ class EventExecutor:
 
             elif field_type == "radio":
                 if field_el in chosen_radios:
+                    label_hint = element_display_hint(field_el, label_keys=("label", "aria_label"))
                     actions.append(
                         CrawlAction(
                             action_type="click",
                             selector=selector,
-                            description="Select radio option",
+                            description=f"Select radio option {label_hint}".strip(),
                             metadata={
                                 "form_id": form.get("form_id"),
                                 "field": field_el.get("name") or field_el.get("id"),
@@ -228,12 +239,16 @@ class EventExecutor:
                 if value is None:
                     value = self._resolver.resolve(field_el)
 
+                label_hint = element_display_hint(field_el, label_keys=("label", "aria_label"))
+                type_hint = field_type or tag
+                desc = f"Type into {type_hint} {label_hint}".strip()
+
                 actions.append(
                     CrawlAction(
                         action_type="type",
                         selector=selector,
                         value=value,
-                        description="Type input",
+                        description=desc,
                         metadata={
                             "form_id": form.get("form_id"),
                             "field": field_el.get("name") or field_el.get("id"),
@@ -243,17 +258,28 @@ class EventExecutor:
                     )
                 )
 
-        method = str(form.get("method", "get") or "get").lower()
         submit_frame = submit.get("frame") if isinstance(submit, dict) else None
+        submit_label = element_display_hint(submit, label_keys=("label", "aria_label")) if isinstance(submit, dict) else ""
+        submit_desc_parts = []
+        if form_id:
+            submit_desc_parts.append(f"Submit form '{form_id}'")
+        else:
+            submit_desc_parts.append("Submit form")
+        submit_desc_parts.append(form_method.upper())
+        if form_action:
+            submit_desc_parts.append(form_action)
+        if submit_label:
+            submit_desc_parts.append(f"via {submit_label}")
+
         actions.append(
             CrawlAction(
                 action_type="click",
                 selector=str(submit["selector"]),
-                description=f"Submit form '{form.get('form_id', '')}'",
+                description=" ".join(submit_desc_parts).strip(),
                 metadata={
                     "form_id": form.get("form_id"),
-                    "form_method": method,
-                    "form_action": form.get("action", ""),
+                    "form_method": form_method,
+                    "form_action": form_action,
                     "frame": submit_frame or form.get("frame"),
                 },
             )
@@ -286,20 +312,30 @@ class StateReplayer:
         if not info:
             return False
 
-        last_error: Optional[Exception] = None
-        for _ in range(self._settings.REPLAY_RETRY_COUNT + 1):
-            try:
-                await self._browser.navigate(info.checkpoint_url)
-                await self._browser.wait_for_settle()
-                for action in info.actions:
-                    await self._executor.execute_action(action)
-                await self._browser.wait_for_settle()
-                current_hash = await self._browser.get_state_hash()
-                if current_hash == state_hash:
-                    return True
-            except Exception as e:
-                last_error = e
+        async def attempt(checkpoint_url: str, actions: List[CrawlAction]) -> bool:
+            last_error: Optional[Exception] = None
+            for _ in range(self._settings.REPLAY_RETRY_COUNT + 1):
+                try:
+                    await self._browser.navigate(checkpoint_url)
+                    await self._browser.wait_for_settle()
+                    for action in actions:
+                        await self._executor.execute_action(action)
+                    await self._browser.wait_for_settle()
+                    current_hash = await self._browser.get_state_hash()
+                    if current_hash == state_hash:
+                        return True
+                except Exception as e:
+                    last_error = e
+            if last_error:
+                raise last_error
+            return False
 
-        if last_error:
-            raise last_error
+        try:
+            if await attempt(info.checkpoint_url, info.actions):
+                return True
+        except Exception:
+            pass
+
+        if info.fallback_checkpoint_url:
+            return await attempt(info.fallback_checkpoint_url, info.fallback_actions)
         return False
