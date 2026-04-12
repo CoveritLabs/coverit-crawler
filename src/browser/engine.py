@@ -1,11 +1,11 @@
 import hashlib
 import re
 import os
-from src.utils import read_file
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
-from src.config import Config, config
+from ..utils import read_file
+from ..config import Config, config
 
 from playwright.async_api import (
     Browser,
@@ -325,16 +325,7 @@ class BrowserEngine:
     def is_same_domain(self, url1: str, url2: str) -> bool:
         return urlparse(url1).netloc == urlparse(url2).netloc
 
-    def _is_same_domain(self, url1: str, url2: str) -> bool:
-        return self.is_same_domain(url1, url2)
-
     def get_selector_for_element(self, element: dict) -> Optional[str]:
-        candidates = element.get("selector_candidates")
-        if isinstance(candidates, list):
-            for candidate in candidates:
-                if isinstance(candidate, str) and candidate.strip():
-                    return candidate.strip()
-
         tag = element.get("tag", "")
         el_id = element.get("id", "")
         name = element.get("name", "")
