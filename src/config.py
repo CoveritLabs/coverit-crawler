@@ -12,7 +12,8 @@ class Config:
     HEADLESS: bool = os.getenv("HEADLESS", "true").lower() == "true"
     TIMEOUT_MS: int = int(os.getenv("TIMEOUT_MS", 3000))
     MAX_STATES: int = int(os.getenv("MAX_STATES", 1000))
-    MAX_ELEMENTS_PER_STATE: int = int(os.getenv("MAX_ELEMENTS_PER_STATE", 5))
+    MAX_TRANSITIONS: int = int(os.getenv("MAX_TRANSITIONS", 5000))
+    MAX_ELEMENTS_PER_STATE: int = int(os.getenv("MAX_ELEMENTS_PER_STATE", 30))
     MAX_SELECT_OPTIONS_PER_ELEMENT: int = int(os.getenv("MAX_SELECT_OPTIONS_PER_ELEMENT", 3))
 
     MAX_ACTION_REPEATS_PER_URL: int = int(os.getenv("MAX_ACTION_REPEATS_PER_URL", 2))
@@ -34,8 +35,5 @@ class Config:
         "DESTRUCTIVE_KEYWORDS",
         "logout,log out,sign out,delete,remove,unsubscribe,cancel,checkout,pay,purchase,order,place order,reset,deactivate,terminate,drop,empty cart,clear cart",
     )
-
-    LOGIN_USERNAME: str = os.getenv("LOGIN_USERNAME", "")
-    LOGIN_PASSWORD: str = os.getenv("LOGIN_PASSWORD", "")
 
 config = Config()

@@ -37,6 +37,10 @@ class CrawlSession:
         config_path: Optional[str] = None,
         session_id: Optional[str] = None,
         headless: Optional[bool] = None,
+        max_states: Optional[int] = None,
+        max_transitions: Optional[int] = None,
+        timeout_ms: Optional[int] = None,
+        input_defaults: Optional[dict] = None,
         *,
         browser: Optional[BrowserEngine] = None,
         settings: Config = config,
@@ -47,6 +51,7 @@ class CrawlSession:
         self.graph_builder = graph_builder
         self.headless = settings.HEADLESS if headless is None else headless
         self.config_path = config_path
+        self._input_defaults = input_defaults
         self.session_id = session_id or str(uuid4())
 
         self.discovered_states: Set[str] = set()
@@ -60,17 +65,29 @@ class CrawlSession:
             max_repeats_per_scope=int(getattr(settings, "MAX_ACTION_REPEATS_PER_URL", 2))
         )
 
-        self.browser = browser or BrowserEngine(headless=self.headless, settings=settings)
+        self.browser = browser or BrowserEngine(
+            headless=self.headless,
+            timeout_ms=timeout_ms,
+            settings=settings,
+        )
         self.executor: Optional[EventExecutor] = None
         self.replayer: Optional[StateReplayer] = None
-        self._max_states: int = 100
-        self._max_transitions: int = 500
+        self._max_states: int = int(
+            max_states if max_states is not None else getattr(settings, "MAX_STATES", 1000)
+        )
+        self._max_transitions: int = int(
+            max_transitions if max_transitions is not None else getattr(settings, "MAX_TRANSITIONS", 5000)
+        )
         self._state_count: int = 0
         self._transition_count: int = 0
 
     async def initialize(self) -> None:
         await self.browser.start()
-        self.executor = EventExecutor(self.browser, self.config_path)
+        self.executor = EventExecutor(
+            self.browser,
+            config_path=self.config_path,
+            input_defaults=self._input_defaults,
+        )
         self.replayer = StateReplayer(self.browser, self.executor, self._settings)
         logger.info("Crawl session initialized")
 
@@ -105,11 +122,7 @@ class CrawlSession:
     def _within_limits(self) -> bool:
         return self._state_count < self._max_states and self._transition_count < self._max_transitions
 
-    async def run_crawl(self, max_states: Optional[int] = None, max_transitions: Optional[int] = None) -> None:
-        max_states_value = int(max_states if max_states is not None else self._settings.MAX_STATES)
-        max_transitions_value = int(max_transitions if max_transitions is not None else 500)
-        self._max_states = max_states_value
-        self._max_transitions = max_transitions_value
+    async def run_crawl(self) -> None:
         try:
             await self.initialize()
             await self._seed_initial_state()
@@ -120,8 +133,8 @@ class CrawlSession:
                     if current:
                         logger.info(
                             f"Exploring state {current.state_hash} "
-                            f"({self._state_count}/{max_states_value} states, "
-                            f"{self._transition_count}/{max_transitions_value} transitions)"
+                            f"({self._state_count}/{self._max_states} states, "
+                            f"{self._transition_count}/{self._max_transitions} transitions)"
                         )
                         await self._explore_state(current)
                     continue
@@ -161,8 +174,6 @@ class CrawlSession:
         logger.info(f"Initial state: {initial_state.state_hash} at {initial_state.url}")
 
     async def _attempt_login_if_needed(self) -> None:
-        if not self._settings.LOGIN_USERNAME or not self._settings.LOGIN_PASSWORD:
-            return
         if self._login_attempts >= 2:
             return
         if not self.executor:
@@ -174,10 +185,7 @@ class CrawlSession:
             return
 
         self._login_attempts += 1
-        actions = self.executor.plan_form_submission(
-            login_form,
-            overrides={"username": self._settings.LOGIN_USERNAME, "password": self._settings.LOGIN_PASSWORD},
-        )
+        actions = self.executor.plan_form_submission(login_form)
         if not actions:
             return
 
