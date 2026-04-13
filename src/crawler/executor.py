@@ -18,10 +18,11 @@ class StateReplayInfo:
 
 class InputValueResolver:
     def __init__(
-        self, 
-        config_path: Optional[str] = None, 
+        self,
+        config_path: Optional[str] = None,
+        input_defaults: Optional[Dict[str, Any]] = None,
     ):
-        self._config = self._load_config(config_path)
+        self._config = input_defaults if isinstance(input_defaults, dict) else self._load_config(config_path)
 
     def _load_config(self, path: Optional[str]) -> Dict[str, Any]:
         if not path:
@@ -90,9 +91,14 @@ class InputValueResolver:
         return value
 
 class EventExecutor:
-    def __init__(self, browser: BrowserEngine, config_path: Optional[str] = None):
+    def __init__(
+        self,
+        browser: BrowserEngine,
+        config_path: Optional[str] = None,
+        input_defaults: Optional[Dict[str, Any]] = None,
+    ):
         self._browser = browser
-        self._resolver = InputValueResolver(config_path=config_path)
+        self._resolver = InputValueResolver(config_path=config_path, input_defaults=input_defaults)
         self._transition_log: List[AbstractTransition] = []
 
     def resolve_value(self, element: dict) -> str:
@@ -130,8 +136,6 @@ class EventExecutor:
     def plan_form_submission(
         self,
         form: dict,
-        *,
-        overrides: Optional[Dict[str, str]] = None,
     ) -> Optional[List[CrawlAction]]:
         fields = list(form.get("fields", []))
         submit = form.get("submit")
@@ -225,19 +229,7 @@ class EventExecutor:
                     )
 
             elif tag in ("input", "textarea"):
-                value: Optional[str] = None
-                if overrides:
-                    if field_type == "password" and overrides.get("password"):
-                        value = overrides["password"]
-                    elif field_type in ("text", "email", "search", "tel", "url") and overrides.get("username"):
-                        label = str(field_el.get("label", "") or "").lower()
-                        name = str(field_el.get("name", "") or "").lower()
-                        placeholder = str(field_el.get("placeholder", "") or "").lower()
-                        if any(k in (label + " " + name + " " + placeholder) for k in ("user", "email", "login")):
-                            value = overrides["username"]
-
-                if value is None:
-                    value = self._resolver.resolve(field_el)
+                value = self._resolver.resolve(field_el)
 
                 label_hint = element_display_hint(field_el, label_keys=("label", "aria_label"))
                 type_hint = field_type or tag
