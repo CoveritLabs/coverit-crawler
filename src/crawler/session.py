@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import logging
 from collections import deque
@@ -45,8 +46,10 @@ class CrawlSession:
         browser: Optional[BrowserEngine] = None,
         settings: Config = config,
         risk_classifier: Optional[RiskClassifier] = None,
+        run_permission: Optional[asyncio.Event] = None,
     ):
         self._settings = settings
+        self._run_permission = run_permission
         self.base_url = base_url
         self.graph_builder = graph_builder
         self.headless = settings.HEADLESS if headless is None else headless
@@ -81,6 +84,18 @@ class CrawlSession:
         self._state_count: int = 0
         self._transition_count: int = 0
 
+    @property
+    def state_count(self) -> int:
+        return self._state_count
+
+    @property
+    def transition_count(self) -> int:
+        return self._transition_count
+
+    async def _wait_permission(self) -> None:
+        if self._run_permission is not None:
+            await self._run_permission.wait()
+
     async def initialize(self) -> None:
         await self.browser.start()
         self.executor = EventExecutor(
@@ -98,6 +113,7 @@ class CrawlSession:
     async def add_to_queue(self, state: AbstractState) -> None:
         if state.state_hash in self.discovered_states:
             return
+        await self._wait_permission()
         self._state_count += 1
         self.discovered_states.add(state.state_hash)
         self.discovery_queue.append(state)
@@ -109,6 +125,7 @@ class CrawlSession:
     async def add_transition(self, transition: AbstractTransition) -> None:
         if transition.transition_id in self._seen_transition_ids:
             return
+        await self._wait_permission()
         self._seen_transition_ids.add(transition.transition_id)
         self._transition_count += 1
         await self.graph_builder.add_transition(transition)
@@ -128,6 +145,7 @@ class CrawlSession:
             await self._seed_initial_state()
 
             while self._within_limits():
+                await self._wait_permission()
                 if not self.is_complete:
                     current = self.get_next_state()
                     if current:
@@ -157,6 +175,7 @@ class CrawlSession:
             await self.cleanup()
 
     async def _seed_initial_state(self) -> None:
+        await self._wait_permission()
         await self.browser.navigate(self.base_url)
         await self.browser.wait_for_settle()
 
@@ -179,6 +198,8 @@ class CrawlSession:
         if not self.executor:
             return
 
+        await self._wait_permission()
+
         forms = await self.browser.get_forms()
         login_form = self._select_login_form(forms)
         if not login_form:
@@ -190,6 +211,7 @@ class CrawlSession:
             return
 
         for action in actions:
+            await self._wait_permission()
             await self.executor.execute_action(action)
 
     def _select_login_form(self, forms: List[dict]) -> Optional[dict]:
@@ -224,6 +246,7 @@ class CrawlSession:
         for form in forms:
             if not self._within_limits():
                 break
+            await self._wait_permission()
             await self._process_form(form, current, current_info)
             try:
                 await self.replayer.replay_to(current.state_hash)
@@ -239,6 +262,7 @@ class CrawlSession:
                 break
             if not self._should_process_element(element):
                 continue
+            await self._wait_permission()
             await self._process_element(element, current, current_info)
             processed += 1
 
@@ -423,6 +447,8 @@ class CrawlSession:
         if not actions:
             return
 
+        await self._wait_permission()
+
         primary = actions[-1]
         primary.metadata = dict(primary.metadata or {})
         primary.metadata["sequence_digest"] = self._sequence_digest(actions)
@@ -443,6 +469,7 @@ class CrawlSession:
 
         try:
             for action in actions:
+                await self._wait_permission()
                 await self.executor.execute_action(action)
 
             await self.browser.wait_for_settle()
@@ -591,6 +618,7 @@ class CrawlSession:
     async def _run_deferred_item(self, item: DeferredWorkItem) -> None:
         if not self.replayer:
             return
+        await self._wait_permission()
         try:
             ok = await self.replayer.replay_to(item.source_state.state_hash)
             if not ok:

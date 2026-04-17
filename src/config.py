@@ -35,5 +35,6 @@ class Config:
         "DESTRUCTIVE_KEYWORDS",
         "logout,log out,sign out,delete,remove,unsubscribe,cancel,checkout,pay,purchase,order,place order,reset,deactivate,terminate,drop,empty cart,clear cart",
     )
+    DATABASE_URL: str = os.getenv("DATABASE_URL", None)
 
 config = Config()

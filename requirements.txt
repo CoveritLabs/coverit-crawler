@@ -4,5 +4,6 @@ sqlalchemy>=2.0.0
 neo4j>=5.18.0
 playwright>=1.45.0
 python-dotenv>=1.0.0
+redis>=5.0.0
 pytest>=8.3.0
 pytest-asyncio>=0.24.0
