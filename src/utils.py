@@ -7,13 +7,8 @@ def read_file(file_path: str) -> str:
     return js_code
 
 
-def to_ms(seconds: Optional[Any]) -> Optional[int]:
-    if seconds is None:
-        return None
-    try:
-        return int(float(seconds) * 1000)
-    except Exception:
-        return None
+def to_ms(seconds: float) -> Optional[int]:
+    return int(float(seconds) * 1000)
 
 def coerce_int(value: Any, default: int) -> int:
     if value is None:

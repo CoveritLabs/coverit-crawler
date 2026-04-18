@@ -11,7 +11,7 @@ from ..config import Config, config
 from ..crawler.session import CrawlSession
 from ..graph.builder import Neo4jGraphBuilder
 
-
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -109,16 +109,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _configure_logging() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        stream=sys.stderr,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-
-
 async def main() -> int:
-    _configure_logging()
     args = _build_parser().parse_args()
 
     settings = config
