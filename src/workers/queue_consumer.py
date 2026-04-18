@@ -2,7 +2,6 @@ import asyncio
 import logging
 import os
 import socket
-import sys
 from typing import Any
 
 from redis.asyncio import Redis
@@ -10,7 +9,6 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from ..config import config
 
 from ..db.database import create_engine, create_sessionmaker
-from ..utils import to_ms
 from ..db.crawl_sessions import (
     fetch_job_inputs,
     get_session_status,
@@ -29,7 +27,7 @@ from ..queue.crawl_stream import (
 )
 from .crawler_worker import CrawlJob, CrawlerWorker
 
-
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -38,14 +36,10 @@ def _build_payload_from_db(config_json: dict[str, Any], base_url: str, session_i
     if not isinstance(crawler_settings, dict):
         crawler_settings = {}
 
-    timeout_ms = crawler_settings.get("timeout_ms")
-    if timeout_ms is None:
-        timeout_ms = to_ms(config_json.get("timeoutSeconds"))
-
     settings = {
-        "headless": crawler_settings.get("headless", config_json.get("headless")),
-        "timeout_ms": timeout_ms,
-        "max_states": crawler_settings.get("max_states", config_json.get("maxStates")),
+        "headless": crawler_settings.get("headless"),
+        "timeout_ms": crawler_settings.get("timeout_ms"),
+        "max_states": crawler_settings.get("maxStates"),
         "max_transitions": crawler_settings.get("max_transitions"),
         "max_elements_per_state": crawler_settings.get("max_elements_per_state"),
         "max_select_options_per_element": crawler_settings.get("max_select_options_per_element"),
@@ -58,9 +52,7 @@ def _build_payload_from_db(config_json: dict[str, Any], base_url: str, session_i
         "use_dom_quiescence": crawler_settings.get("use_dom_quiescence"),
         "page_load_state": crawler_settings.get("page_load_state"),
         "click_non_http_links": crawler_settings.get("click_non_http_links"),
-        "defer_destructive_actions": crawler_settings.get(
-            "defer_destructive_actions", config_json.get("deferDestructiveActions")
-        ),
+        "defer_destructive_actions": crawler_settings.get("defer_destructive_actions"),
         "destructive_keywords": (
             ",".join(crawler_settings.get("destructive_keywords"))
             if isinstance(crawler_settings.get("destructive_keywords"), list)
@@ -169,16 +161,7 @@ async def _process_session(worker: CrawlerWorker, db: async_sessionmaker, sessio
             pass
 
 
-def _configure_logging() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        stream=sys.stderr,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-
-
 async def main() -> int:
-    _configure_logging()
 
     redis_url = os.getenv("REDIS_URL")
     db_url = os.getenv("DATABASE_URL")
@@ -206,7 +189,6 @@ async def main() -> int:
                 count=1,
                 block=5000,
             )
-            print("JOOEEEEEEE: ", resp)
             if not resp:
                 continue
 
