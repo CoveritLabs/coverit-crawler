@@ -112,7 +112,7 @@ async def _process_session(worker: CrawlerWorker, db: async_sessionmaker, sessio
 
     try:
         while True:
-            done, _pending = await asyncio.wait(
+            done, _ = await asyncio.wait(
                 {crawl_task, poll_task},
                 return_when=asyncio.FIRST_COMPLETED,
             )
@@ -192,7 +192,7 @@ async def main() -> int:
             if not resp:
                 continue
 
-            for _stream, messages in resp:
+            for _, messages in resp:
                 for message_id, fields in messages:
                     try:
                         session_id = parse_session_id(fields)
