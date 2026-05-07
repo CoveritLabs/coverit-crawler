@@ -1,4 +1,5 @@
 import hashlib
+import json
 import re
 import os
 from datetime import datetime, timezone
@@ -355,6 +356,8 @@ class BrowserEngine:
         normalized = re.sub(r"\s+", " ", str(semantic_content).lower()).strip()
         normalized = re.sub(r"[\u0000-\u001f]+", " ", normalized).strip()
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
     
     async def get_interactable_elements(self) -> List[Dict[str, Any]]:
         self._require_page()
@@ -394,3 +397,73 @@ class BrowserEngine:
                 "timestamp": datetime.now(timezone.utc),
             },
         )
+    
+    async def export_storage_state(self) -> Dict[str, Any]:
+        context = self._require_context()
+        return await context.storage_state()
+
+    def _require_browser(self) -> Browser:
+        if not self.browser:
+            raise RuntimeError("Browser not started")
+        return self.browser
+
+    def _parse_storage_state(self, storage_state: Any) -> Optional[Dict[str, Any]]:
+        if storage_state is None:
+            return None
+        if isinstance(storage_state, dict):
+            return storage_state
+        if isinstance(storage_state, (bytes, bytearray)):
+            storage_state = storage_state.decode("utf-8")
+        if isinstance(storage_state, str):
+            raw = storage_state.strip()
+            if not raw:
+                return None
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError as e:
+                raise ValueError("Invalid storage_state JSON") from e
+            if parsed is None:
+                return None
+            if not isinstance(parsed, dict):
+                raise ValueError("storage_state JSON must decode to an object")
+            return parsed
+        raise TypeError("storage_state must be a dict, JSON string, or bytes")
+
+    def _normalize_storage_state_for_context(self, storage_state: Any) -> Optional[Dict[str, Any]]:
+        parsed = self._parse_storage_state(storage_state)
+        if parsed is None:
+            return None
+
+        cookies = parsed.get("cookies")
+        origins = parsed.get("origins")
+        if cookies is not None and not isinstance(cookies, list):
+            raise ValueError("storage_state.cookies must be a list")
+        if origins is not None and not isinstance(origins, list):
+            raise ValueError("storage_state.origins must be a list")
+
+        return parsed
+
+    async def new_context_from_storage_state(self, storage_state: Any = None) -> BrowserContext:
+        browser = self._require_browser()
+        normalized = self._normalize_storage_state_for_context(storage_state)
+        if normalized is None:
+            return await browser.new_context()
+        return await browser.new_context(storage_state=normalized)
+
+    async def reset_context_from_storage_state(self, storage_state: Any = None) -> None:
+        if self.context:
+            await self.context.close()
+        self.context = await self.new_context_from_storage_state(storage_state)
+        self.page = await self.context.new_page()
+        self.page.set_default_timeout(self.timeout_ms)
+
+    async def start_with_storage_state(self, storage_state: Any = None) -> None:
+        self.playwright = await async_playwright().start()
+        self.browser = await self.playwright.chromium.launch(headless=self.headless)
+        normalized = self._normalize_storage_state_for_context(storage_state)
+        if normalized is None:
+            self.context = await self.browser.new_context()
+        else:
+            self.context = await self.browser.new_context(storage_state=normalized)
+        self.page = await self.context.new_page()
+        self.page.set_default_timeout(self.timeout_ms)
