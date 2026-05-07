@@ -78,6 +78,30 @@ class Neo4jGraphBuilder:
                 session_id=str(crawl_session_id),
             )
 
+    async def set_state_properties(self, crawl_session_id: str, state_hash: str, props: Dict) -> None:
+        if not self.driver:
+            raise RuntimeError("Neo4j driver not initialized")
+        if not crawl_session_id:
+            raise ValueError("crawl_session_id is required")
+        if not state_hash:
+            raise ValueError("state_hash is required")
+        if not isinstance(props, dict) or not props:
+            return
+
+        query = """
+        MATCH (s:State {session_id: $session_id, state_hash: $state_hash})
+        SET s += $props
+        RETURN s
+        """
+
+        async with self.driver.session() as session:
+            await session.run(
+                query,
+                session_id=str(crawl_session_id),
+                state_hash=str(state_hash),
+                props=props,
+            )
+
     async def add_transition(
         self, transition: AbstractTransition
     ) -> None:

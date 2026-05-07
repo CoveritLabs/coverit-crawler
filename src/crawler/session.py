@@ -185,11 +185,16 @@ class CrawlSession:
         initial_state = await self.browser.capture_state()
         if not self.replayer:
             return
-        self.replayer.register(
-            initial_state.state_hash,
-            StateReplayInfo(checkpoint_url=initial_state.url),
-        )
         await self.add_to_queue(initial_state)
+
+        info = StateReplayInfo(
+            checkpoint_url=initial_state.url,
+            checkpoint_state_hash=initial_state.state_hash,
+            checkpoint_kind="initial",
+        )
+        updated = self.replayer.register(initial_state.state_hash, info)
+        if updated:
+            await self._persist_replay_artifacts(state_hash=initial_state.state_hash, info=info, persist_storage_state=True)
         logger.info(f"Initial state: {initial_state.state_hash} at {initial_state.url}")
 
     async def _attempt_login_if_needed(self) -> None:
@@ -499,11 +504,18 @@ class CrawlSession:
             if new_state.state_hash == source.state_hash:
                 return
 
-            self.replayer.register(
-                new_state.state_hash,
-                self._build_replay_info(source_info, actions, reached_url=new_url),
-            )
+            info = self._build_replay_info(source_info, actions, reached_url=new_url)
+            if not info.checkpoint_state_hash:
+                info.checkpoint_state_hash = new_state.state_hash
+
+            updated = self.replayer.register(new_state.state_hash, info)
             await self.add_to_queue(new_state)
+            if updated:
+                await self._persist_replay_artifacts(
+                    state_hash=new_state.state_hash,
+                    info=info,
+                    persist_storage_state=(info.checkpoint_state_hash == new_state.state_hash),
+                )
             await self.add_transition(self._build_transition(source, new_state, actions))
 
         except Exception as e:
@@ -540,20 +552,43 @@ class CrawlSession:
         reached = self._normalize_checkpoint_url(reached_url)
         parent = self._normalize_checkpoint_url(current_info.checkpoint_url)
 
-        fallback_actions = current_info.actions + list(actions)
+        seq_actions = current_info.actions + list(actions)
         if reached and reached != parent:
             return StateReplayInfo(
                 checkpoint_url=reached,
+                checkpoint_state_hash="",
+                checkpoint_kind="url_change",
                 actions=[],
                 fallback_checkpoint_url=current_info.checkpoint_url,
-                fallback_actions=fallback_actions,
+                fallback_checkpoint_state_hash=current_info.checkpoint_state_hash,
+                fallback_actions=seq_actions,
             )
+
+        fallback_checkpoint_url = getattr(current_info, "fallback_checkpoint_url", None)
+        fallback_checkpoint_state_hash = getattr(current_info, "fallback_checkpoint_state_hash", None)
+        base_fallback_actions = list(getattr(current_info, "fallback_actions", []))
+        combined_fallback_actions = base_fallback_actions + seq_actions if fallback_checkpoint_url else base_fallback_actions
 
         return StateReplayInfo(
             checkpoint_url=current_info.checkpoint_url,
-            actions=fallback_actions,
-            fallback_checkpoint_url=getattr(current_info, "fallback_checkpoint_url", None),
-            fallback_actions=list(getattr(current_info, "fallback_actions", [])),
+            checkpoint_state_hash=current_info.checkpoint_state_hash,
+            checkpoint_kind=current_info.checkpoint_kind,
+            actions=seq_actions,
+            fallback_checkpoint_url=fallback_checkpoint_url,
+            fallback_checkpoint_state_hash=fallback_checkpoint_state_hash,
+            fallback_actions=combined_fallback_actions,
+        )
+
+    async def _persist_replay_artifacts(self, *, state_hash: str, info: StateReplayInfo, persist_storage_state: bool) -> None:
+        props = info.to_neo4j_props(state_hash=state_hash)
+        await self.graph_builder.set_state_properties(self.session_id, state_hash, props)
+        if not persist_storage_state:
+            return
+        storage_state = await self.browser.export_storage_state()
+        await self.graph_builder.set_state_properties(
+            self.session_id,
+            state_hash,
+            {"checkpoint_storage_state_json": stable_json_dumps(storage_state)},
         )
 
     def _normalize_checkpoint_url(self, url: str) -> str:
