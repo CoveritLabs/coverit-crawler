@@ -72,6 +72,14 @@
         if (el.name) candidates.push(`${tag}[name="${escapeAttrValue(el.name)}"]`);
         const ariaLabel = el.getAttribute && el.getAttribute("aria-label");
         if (ariaLabel) candidates.push(`${tag}[aria-label="${escapeAttrValue(ariaLabel)}"]`);
+
+        const visibleText = (tag === "input" ? "" : (el.innerText || "")).trim();
+        if (visibleText) {
+            const safeText = escapeAttrValue(visibleText);
+            if (tag === "button" || tag === "a") {
+                candidates.push(`${tag}:has-text("${safeText}")`);
+            }
+        }
         if (tag === "input") {
             const type = (el.type || "").toLowerCase();
             const value = el.getAttribute && el.getAttribute("value");
@@ -165,8 +173,10 @@
 
         const inForm = !!(el.closest && el.closest("form"));
         const path = cssPath(el);
+        const candidates = selectorCandidates(el);
+        const primarySelector = candidates && candidates.length ? candidates[0] : path;
         const frameSig = frame && (frame.url || frame.src || frame.name || frame.id) ? `${frame.url || frame.src || frame.name || frame.id}` : "";
-        const signature = (frameSig ? `${frameSig}::` : "") + (path || `${tag}|${type}|${name}|${href}|${i}`);
+        const signature = (frameSig ? `${frameSig}::` : "") + (primarySelector || `${tag}|${type}|${name}|${href}|${i}`);
 
         if (seen.has(signature)) continue;
         seen.add(signature);

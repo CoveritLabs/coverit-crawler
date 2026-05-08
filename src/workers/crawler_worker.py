@@ -3,38 +3,39 @@ import asyncio
 import json
 import logging
 import sys
-from copy import copy
+from dataclasses import replace
 from typing import Optional
-from .crawl_job import CrawlJob
 
-from ..config import Config, config
-from ..crawler.session import CrawlSession
-from ..graph.builder import Neo4jGraphBuilder
+from src import Config, config
+from src.crawler import CrawlSession
+from src.graph import Neo4jGraphBuilder
+from src.models import CrawlJob
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 def _job_settings(base: Config, job: CrawlJob) -> Config:
-    overridden = copy(base)
-    overridden.HEADLESS = job.headless
-    overridden.TIMEOUT_MS = job.timeout_ms
-    overridden.MAX_STATES = job.max_states
-    overridden.MAX_TRANSITIONS = job.max_transitions
-    overridden.MAX_ELEMENTS_PER_STATE = job.max_elements_per_state
-    overridden.MAX_SELECT_OPTIONS_PER_ELEMENT = job.max_select_options_per_element
-    overridden.MAX_ACTION_REPEATS_PER_URL = job.max_action_repeats_per_url
-    overridden.ACTION_RETRY_COUNT = job.action_retry_count
-    overridden.REPLAY_RETRY_COUNT = job.replay_retry_count
-    overridden.POPUP_TIMEOUT_MS = job.popup_timeout_ms
-    overridden.DOM_QUIET_MS = job.dom_quiet_ms
-    overridden.DOM_SETTLE_TIMEOUT_MS = job.dom_settle_timeout_ms
-    overridden.USE_DOM_QUIESCENCE = job.use_dom_quiescence
-    overridden.PAGE_LOAD_STATE = job.page_load_state
-    overridden.CLICK_NON_HTTP_LINKS = job.click_non_http_links
-    overridden.DEFER_DESTRUCTIVE_ACTIONS = job.defer_destructive_actions
-    overridden.DESTRUCTIVE_KEYWORDS = job.destructive_keywords
-    return overridden
+    return replace(
+        base,
+        HEADLESS=job.headless,
+        TIMEOUT_MS=job.timeout_ms,
+        MAX_STATES=job.max_states,
+        MAX_TRANSITIONS=job.max_transitions,
+        MAX_ELEMENTS_PER_STATE=job.max_elements_per_state,
+        MAX_SELECT_OPTIONS_PER_ELEMENT=job.max_select_options_per_element,
+        MAX_ACTION_REPEATS_PER_URL=job.max_action_repeats_per_url,
+        ACTION_RETRY_COUNT=job.action_retry_count,
+        REPLAY_RETRY_COUNT=job.replay_retry_count,
+        POPUP_TIMEOUT_MS=job.popup_timeout_ms,
+        DOM_QUIET_MS=job.dom_quiet_ms,
+        DOM_SETTLE_TIMEOUT_MS=job.dom_settle_timeout_ms,
+        USE_DOM_QUIESCENCE=job.use_dom_quiescence,
+        PAGE_LOAD_STATE=job.page_load_state,
+        CLICK_NON_HTTP_LINKS=job.click_non_http_links,
+        DEFER_DESTRUCTIVE_ACTIONS=job.defer_destructive_actions,
+        DESTRUCTIVE_KEYWORDS=job.destructive_keywords,
+    )
 
 
 class CrawlerWorker:
