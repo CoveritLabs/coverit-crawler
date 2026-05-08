@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coverit-crawler"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "arq>=0.26.0",
+  "asyncpg>=0.30.0,<1.0",
+  "greenlet>=3.1.0",
+  "neo4j>=5.18.0",
+  "playwright>=1.45.0",
+  "python-dotenv>=1.0.0",
+  "redis>=5.0.0",
+  "sqlalchemy>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+  "pytest-asyncio>=0.24.0",
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src", "src.*"]

@@ -1,16 +1,18 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Any, Dict
+from typing import Any
 from uuid import uuid4
 
 @dataclass
 class AbstractState:
     """Represents an abstract state in the application state graph."""
 
-    state_hash: str = "" 
+    state_hash: str = ""
     url: str = ""
     title: str = ""
-    dom_snapshot: Dict[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    dom_snapshot: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __hash__(self) -> int:
         return hash(self.state_hash)
@@ -46,4 +48,4 @@ class CrawlAction:
     selector: str = ""
     value: str = ""
     description: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)

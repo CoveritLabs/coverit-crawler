@@ -1,18 +1,19 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from uuid import uuid4
 
-from ..config import Config
-from ..utils import coerce_bool, coerce_int, coerce_str
+from src.config import Config
+from src.utils.coercion import coerce_bool, coerce_int, coerce_str
 
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
-
-def _default_input_config_path() -> Optional[str]:
-    candidate = _repo_root() / "input_defaults.json"
+def _default_input_config_path() -> str | None:
+    candidate = _repo_root() / "src" / "configs" / "input_defaults.json"
     return str(candidate) if candidate.exists() else None
 
 
@@ -37,11 +38,11 @@ class CrawlJob:
     click_non_http_links: bool
     defer_destructive_actions: bool
     destructive_keywords: str
-    input_defaults: Optional[dict[str, Any]] = None
-    input_defaults_path: Optional[str] = None
+    input_defaults: dict[str, Any] | None = None
+    input_defaults_path: str | None = None
 
     @staticmethod
-    def from_dict(payload: dict[str, Any], settings: Config) -> "CrawlJob":
+    def from_dict(payload: dict[str, Any], settings: Config) -> CrawlJob:
         nested_settings = payload.get("settings")
         if not isinstance(nested_settings, dict):
             raise ValueError("settings must be an object")
@@ -115,7 +116,6 @@ class CrawlJob:
         input_defaults = payload.get("input_defaults")
         if not isinstance(input_defaults, dict):
             input_defaults = None
-
 
         return CrawlJob(
             base_url=base_url,

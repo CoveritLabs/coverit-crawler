@@ -1,8 +1,8 @@
 import hashlib
-from typing import Any, Dict
+from typing import Any
 
-from ..models.graph import CrawlAction
-from .serialization import stable_json_dumps
+from src.utils import stable_json_dumps
+from src.models import CrawlAction
 
 
 def action_attempt_fingerprint(source_state_hash: str, action: CrawlAction) -> str:
@@ -35,7 +35,7 @@ def transition_fingerprint(
     target_state_hash: str,
     action: CrawlAction,
 ) -> str:
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "session_id": session_id,
         "source": source_state_hash,
         "target": target_state_hash,

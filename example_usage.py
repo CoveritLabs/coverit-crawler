@@ -4,7 +4,7 @@ import logging
 import uuid
 
 from src.config import config
-from src.graph.builder import Neo4jGraphBuilder
+from src.graph import create_graph
 from src.crawler.session import CrawlSession
 
 logging.basicConfig(level=logging.INFO)
@@ -18,17 +18,18 @@ X = "https://the-internet.herokuapp.com/challenging_dom"
 async def main():
     logger.info("Starting CoverIt Crawler...")
     logger.info("Connecting to Neo4j...")
-    graph_builder = Neo4jGraphBuilder(
-        config.NEO4J_URI, config.NEO4J_USER, config.NEO4J_PASSWORD
+    client, graph = await create_graph(
+        config.NEO4J_URI,
+        config.NEO4J_USER,
+        config.NEO4J_PASSWORD,
     )
-    await graph_builder.connect()
 
     try:
         crawl_session_id = str(uuid.uuid4())
-        config_path = os.path.join(os.path.dirname(__file__), "input_defaults.json")
+        config_path = os.path.join(os.path.dirname(__file__), "src", "configs", "input_defaults.json")
         session = CrawlSession(
             base_url=BASE_URL,
-            graph_builder=graph_builder,
+            graph_builder=graph,
             config_path=config_path,
             session_id=crawl_session_id,
             headless=False,
@@ -44,7 +45,7 @@ async def main():
 
     finally:
         logger.info("Cleaning up...")
-        await graph_builder.disconnect()
+        await client.close()
         logger.info("Done!")
 
 

@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from ..config import Config, config
-from ..models.graph import CrawlAction
+from src.config import Config, config
+from src.models import CrawlAction
 
 
 @dataclass(frozen=True)
@@ -37,15 +37,3 @@ class RiskClassifier:
 
         haystack = " ".join(text_bits).lower()
         return any(kw and kw in haystack for kw in self.keywords)
-
-
-def is_http_url(url: str) -> bool:
-    u = (url or "").strip().lower()
-    return u.startswith("http://") or u.startswith("https://")
-
-
-def is_non_http_href(href: str) -> bool:
-    h = (href or "").strip().lower()
-    if not h:
-        return False
-    return not (h.startswith("http://") or h.startswith("https://") or h.startswith("/"))
