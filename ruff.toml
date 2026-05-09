@@ -1,0 +1,12 @@
+target-version = "py312"
+line-length = 150
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501", "UP006", "UP015", "UP017", "UP035", "UP042", "UP045"]
+
+[lint.isort]
+known-first-party = ["src"]
+
+[lint.per-file-ignores]
+"src/**/__init__.py" = ["F401"]
