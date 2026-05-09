@@ -13,6 +13,7 @@ node_modules
 
 # Build output
 dist
+*.egg-info
 
 # Test / coverage
 coverage
@@ -34,6 +35,7 @@ coverage
 # Environment variables
 .env
 .env.*
+!.env.example
 
 **/__pycache__/
 /src/generated/prisma
