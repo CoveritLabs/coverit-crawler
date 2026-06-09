@@ -9,6 +9,7 @@ from src.graph.queries import (
     GET_GRAPH,
     GET_ACTIONS,
     CLEAR_SESSION,
+    GET_STATES_WITH_CHECKPOINTS,
 )
 from src.models import AbstractState, AbstractTransition
 from src.utils.serialization import stable_json_dumps
@@ -90,3 +91,18 @@ class GraphRepository:
     async def clear_session_data(self, session_id: str) -> None:
         async with self._driver.session() as session:
             await session.run(CLEAR_SESSION, session_id=session_id)
+
+    async def get_state_graph_with_checkpoints(self, session_id: str) -> dict:
+        async with self._driver.session() as session:
+            result = await session.run(
+                GET_STATES_WITH_CHECKPOINTS, session_id=session_id
+            )
+            record = await result.single()
+            if not record:
+                return {"states": [], "transitions": []}
+            data = record.data()
+            data["transitions"] = [
+                t for t in data["transitions"]
+                if t.get("transition_id") is not None
+            ]
+            return data
