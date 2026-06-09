@@ -39,3 +39,34 @@ CLEAR_SESSION = """
 MATCH (s:State {session_id: $session_id})
 DETACH DELETE s
 """
+
+GET_STATES_WITH_CHECKPOINTS = """
+MATCH (s:State {session_id: $session_id})
+OPTIONAL MATCH (s)-[t:TRANSITION]->(target:State {session_id: $session_id})
+RETURN
+    collect(DISTINCT {
+        state_hash:                     s.state_hash,
+        url:                            s.url,
+        title:                          s.title,
+        first_seen:                     s.first_seen,
+        is_checkpoint:                  s.is_checkpoint,
+        checkpoint_kind:                s.checkpoint_kind,
+        checkpoint_url:                 s.checkpoint_url,
+        checkpoint_state_hash:          s.checkpoint_state_hash,
+        replay_actions_json:            s.replay_actions_json,
+        fallback_checkpoint_url:        s.fallback_checkpoint_url,
+        fallback_checkpoint_state_hash: s.fallback_checkpoint_state_hash,
+        fallback_actions_json:          s.fallback_actions_json,
+        checkpoint_storage_state_json:  s.checkpoint_storage_state_json
+    }) AS states,
+    collect(DISTINCT {
+        transition_id:      t.transition_id,
+        source_hash:        s.state_hash,
+        target_hash:        target.state_hash,
+        action_type:        t.action_type,
+        action_description: t.action_description,
+        action_value:       t.action_value,
+        action_fingerprint: t.action_fingerprint,
+        locator_value:      t.locator_value
+    }) AS transitions
+"""
