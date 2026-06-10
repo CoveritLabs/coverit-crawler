@@ -154,7 +154,7 @@
         const tag = el.tagName.toLowerCase();
         const type = (el.type || "").toLowerCase();
 
-        const href = tag === "a" ? (el.getAttribute("href") || "") : "";
+        const href = tag === "a" ? (el.href || "") : "";
         const name = el.name || "";
         const placeholder = el.placeholder || "";
         const role = el.getAttribute && (el.getAttribute("role") || "");

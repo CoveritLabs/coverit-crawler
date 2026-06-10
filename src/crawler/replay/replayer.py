@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Any
 
 from src.browser import BrowserEngine
 from src.config import Config, config
@@ -33,10 +34,12 @@ class StateReplayer:
         if not info:
             return False
 
-        async def attempt(checkpoint_url: str, actions: list[CrawlAction]) -> bool:
+        async def attempt(checkpoint_url: str, actions: list[CrawlAction], storage_state: Any | None = None) -> bool:
             last_error: Exception | None = None
             for _ in range(self._settings.REPLAY_RETRY_COUNT + 1):
                 try:
+                    if storage_state is not None:
+                        await self._browser.reset_context_from_storage_state(storage_state)
                     await self._browser.navigate(checkpoint_url)
                     await self._browser.wait_for_settle()
                     for action in actions:
@@ -52,11 +55,11 @@ class StateReplayer:
             return False
 
         try:
-            if await attempt(info.checkpoint_url, info.actions):
+            if await attempt(info.checkpoint_url, info.actions, info.storage_state):
                 return True
         except Exception:
             pass
 
         if info.fallback_checkpoint_url:
-            return await attempt(info.fallback_checkpoint_url, info.fallback_actions)
+            return await attempt(info.fallback_checkpoint_url, info.fallback_actions, info.fallback_storage_state)
         return False

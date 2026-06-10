@@ -89,7 +89,6 @@ class CrawlSessionSequenceMixin:
                 return
 
             new_state = await self.browser.capture_state()
-
             if new_state.state_hash == source.state_hash:
                 return
 
@@ -169,6 +168,7 @@ class CrawlSessionSequenceMixin:
                 fallback_checkpoint_url=current_info.checkpoint_url,
                 fallback_checkpoint_state_hash=current_info.checkpoint_state_hash,
                 fallback_actions=seq_actions,
+                fallback_storage_state=current_info.storage_state,
             )
 
         fallback_actions = list(getattr(current_info, "fallback_actions", []))
@@ -178,9 +178,11 @@ class CrawlSessionSequenceMixin:
             checkpoint_state_hash=current_info.checkpoint_state_hash,
             checkpoint_kind=current_info.checkpoint_kind,
             actions=seq_actions,
+            storage_state=current_info.storage_state,
             fallback_checkpoint_url=getattr(current_info, "fallback_checkpoint_url", None),
             fallback_checkpoint_state_hash=getattr(current_info, "fallback_checkpoint_state_hash", None),
             fallback_actions=fallback_actions + seq_actions if getattr(current_info, "fallback_checkpoint_url", None) else fallback_actions,
+            fallback_storage_state=getattr(current_info, "fallback_storage_state", None),
         )
 
     async def _persist_replay_artifacts(
@@ -198,6 +200,7 @@ class CrawlSessionSequenceMixin:
             return
 
         storage_state = await self.browser.export_storage_state()
+        info.storage_state = storage_state
 
         await self.graph_builder.set_state_properties(
             self.session_id,

@@ -65,7 +65,7 @@
             const readonly = !!el.readOnly;
             const required = !!el.required;
             const checked = (type === "checkbox" || type === "radio") ? !!el.checked : false;
-            const href = tag === "a" ? (el.getAttribute("href") || "") : "";
+            const href = tag === "a" ? (el.href || "") : "";
 
             let selected = "";
             if (tag === "select") {

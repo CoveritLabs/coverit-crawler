@@ -192,7 +192,15 @@
             const submit = toSubmit(candidates[0] || null, root.frame);
             const method = (form.method || "get").toLowerCase();
             const hasFillable = fields.some(isFillableField);
+            const resolvedAction = form.action || "";
+            const baseCurrentUrl = window.location.href.split('?')[0].split('#')[0];
+            const baseActionUrl = resolvedAction.split('?')[0].split('#')[0];
 
+            if (method === "get" && fields.length === 0) {
+                if (!resolvedAction || baseActionUrl === baseCurrentUrl) {
+                    continue; 
+                }
+            }
             forms.push({
                 form_id: form.id || `form-${forms.length}`,
                 method,
