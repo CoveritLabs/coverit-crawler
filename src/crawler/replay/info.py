@@ -13,9 +13,11 @@ class StateReplayInfo:
     checkpoint_state_hash: str = ""
     checkpoint_kind: str = "url_change"
     actions: list[CrawlAction] = field(default_factory=list)
+    storage_state: Any | None = None
     fallback_checkpoint_url: str | None = None
     fallback_checkpoint_state_hash: str | None = None
     fallback_actions: list[CrawlAction] = field(default_factory=list)
+    fallback_storage_state: Any | None = None
 
     def to_neo4j_props(self, *, state_hash: str) -> dict[str, Any]:
         def action_to_dict(action: CrawlAction) -> dict[str, Any]:

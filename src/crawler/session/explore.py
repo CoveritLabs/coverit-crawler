@@ -29,6 +29,28 @@ class CrawlSessionExploreMixin:
 
         await self._prepare_state()
 
+        actual_hash = await self.browser.get_state_hash()
+        if actual_hash != current.state_hash:
+            current.state_hash = actual_hash
+            current.url = await self.browser.get_current_url()
+
+            storage_state = await self.browser.export_storage_state()
+            
+            new_info = StateReplayInfo(
+                checkpoint_url=current.url,
+                checkpoint_state_hash=current.state_hash,
+                checkpoint_kind="post_login",
+                storage_state=storage_state,
+            )
+            
+            self.replayer.register(current.state_hash, new_info)
+            
+            await self._persist_replay_artifacts(
+                state_hash=current.state_hash,
+                info=new_info,
+                persist_storage_state=True
+            )
+
         current_info = self._get_current_state_info(current)
 
         if not current_info or not self.executor:

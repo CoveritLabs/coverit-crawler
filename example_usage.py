@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://tryscrapeme.com/"
 QUOTES = "https://quotes.toscrape.com/"
+BOOKS = "https://books.toscrape.com/"
 OTHER_URL = "https://en.wikipedia.org/wiki/Main_Page"
 X = "https://the-internet.herokuapp.com/challenging_dom"
 
@@ -28,7 +29,7 @@ async def main():
         crawl_session_id = str(uuid.uuid4())
         config_path = os.path.join(os.path.dirname(__file__), "src", "configs", "input_defaults.json")
         session = CrawlSession(
-            base_url=BASE_URL,
+            base_url=BOOKS,
             graph_builder=graph,
             config_path=config_path,
             session_id=crawl_session_id,
