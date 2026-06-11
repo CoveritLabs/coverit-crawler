@@ -62,7 +62,7 @@ class Config:
             TIMEOUT_MS=_env_int("TIMEOUT_MS", 3000),
             MAX_STATES=_env_int("MAX_STATES", 1000),
             MAX_TRANSITIONS=_env_int("MAX_TRANSITIONS", 5000),
-            MAX_ELEMENTS_PER_STATE=_env_int("MAX_ELEMENTS_PER_STATE", 5),
+            MAX_ELEMENTS_PER_STATE=_env_int("MAX_ELEMENTS_PER_STATE", 70),
             MAX_SELECT_OPTIONS_PER_ELEMENT=_env_int("MAX_SELECT_OPTIONS_PER_ELEMENT", 3),
             MAX_ACTION_REPEATS_PER_URL=_env_int("MAX_ACTION_REPEATS_PER_URL", 2),
             ACTION_RETRY_COUNT=_env_int("ACTION_RETRY_COUNT", 1),
@@ -72,7 +72,7 @@ class Config:
             DOM_SETTLE_TIMEOUT_MS=_env_int("DOM_SETTLE_TIMEOUT_MS", 3000),
             USE_DOM_QUIESCENCE=_env_bool("USE_DOM_QUIESCENCE", "true"),
             PAGE_LOAD_STATE=os.getenv("PAGE_LOAD_STATE", "networkidle"),
-            CLICK_NON_HTTP_LINKS=_env_bool("CLICK_NON_HTTP_LINKS", "false"),
+            CLICK_NON_HTTP_LINKS=_env_bool("CLICK_NON_HTTP_LINKS", "true"),
             DEFER_DESTRUCTIVE_ACTIONS=_env_bool("DEFER_DESTRUCTIVE_ACTIONS", "true"),
             DESTRUCTIVE_KEYWORDS=os.getenv(
                 "DESTRUCTIVE_KEYWORDS",

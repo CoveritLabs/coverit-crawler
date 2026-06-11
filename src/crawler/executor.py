@@ -26,7 +26,6 @@ class EventExecutor:
     async def execute_action(self, action: CrawlAction) -> None:
         try:
             frame_url, frame_name = self._extract_frame(action.metadata)
-
             match action.action_type:
                 case ActionType.CLICK:
                     await self._browser.click(action.selector, frame_url=frame_url, frame_name=frame_name)

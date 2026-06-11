@@ -1,6 +1,7 @@
 {
     "field_patterns": {
         "email": "test@example.com",
+        "email address": "test@example.com",
         "password": "Test1234!",
         "username": "testuser",
         "user": "testuser",
@@ -37,6 +38,7 @@
     },
     "type_fallbacks": {
         "email": "test@example.com",
+        "email address": "test@example.com",
         "password": "Test1234!",
         "tel": "5551234567",
         "number": "42",
