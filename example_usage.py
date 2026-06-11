@@ -15,6 +15,7 @@ QUOTES = "https://quotes.toscrape.com/"
 BOOKS = "https://books.toscrape.com/"
 OTHER_URL = "https://en.wikipedia.org/wiki/Main_Page"
 X = "https://the-internet.herokuapp.com/challenging_dom"
+WEBSITE_1 = "file:///D:/crawler_test_website/nexus_commerce/index.html"
 
 async def main():
     logger.info("Starting CoverIt Crawler...")
@@ -29,7 +30,7 @@ async def main():
         crawl_session_id = str(uuid.uuid4())
         config_path = os.path.join(os.path.dirname(__file__), "src", "configs", "input_defaults.json")
         session = CrawlSession(
-            base_url=BOOKS,
+            base_url=WEBSITE_1,
             graph_builder=graph,
             config_path=config_path,
             session_id=crawl_session_id,

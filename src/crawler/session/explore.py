@@ -16,7 +16,6 @@ from src.utils import (
     supports_enter_submission,
     text_input_label,
     is_button,
-    is_supported_form_element,
 )
 
 logger = logging.getLogger(__name__)
@@ -154,8 +153,8 @@ class CrawlSessionExploreMixin:
             return False
 
         if element.get("in_form"):
-            return is_supported_form_element(element)
-
+            return False
+        
         return not self._is_blocked_anchor(element)
 
     def _plan_element_sequences(

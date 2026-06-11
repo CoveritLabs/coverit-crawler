@@ -45,20 +45,6 @@ def is_button(element: dict) -> bool:
         )
     )
 
-
-def is_supported_form_element(element: dict) -> bool:
-    tag = element_tag(element)
-    input_type = element_type(element)
-
-    if tag == HtmlTag.SELECT:
-        return True
-
-    return (
-        tag == HtmlTag.INPUT
-        and input_type in (InputType.CHECKBOX, InputType.RADIO)
-    )
-
-
 def supports_enter_submission(element: dict) -> bool:
     return (
         element_tag(element) == HtmlTag.INPUT
