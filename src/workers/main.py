@@ -8,6 +8,7 @@ from arq.worker import WorkerSettings as ArqWorkerSettings
 from src import config
 from src.db import create_engine, create_sessionmaker
 from src.workers.crawler_worker import CrawlerWorker
+from src.workers.flow_worker import generate_flows_for_session
 from src.workers.jobs.crawl_session import crawl_session
 
 
@@ -58,7 +59,7 @@ async def shutdown(ctx: dict) -> None:
 
 class WorkerSettings(ArqWorkerSettings):
     redis_settings = _redis_settings_from_url(config.REDIS_URL or "redis://localhost:6379/0")
-    functions = [crawl_session]
+    functions = [crawl_session,generate_flows_for_session]
     on_startup = startup
     on_shutdown = shutdown
     cron_jobs = []

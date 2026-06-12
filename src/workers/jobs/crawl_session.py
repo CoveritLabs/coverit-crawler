@@ -138,6 +138,9 @@ async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
             if not updated:
                 await mark_finished_at_if_aborted(s, session_id)
 
+        if updated:
+            await ctx["redis"].enqueue_job("generate_flows_for_session", session_id)
+
         return {
             "status": "completed",
             "session_id": session_id,
