@@ -52,19 +52,13 @@ async def main(session_id: str) -> None:
         # Basic stats
         # ----------------------------------------------------------------
         total_flows = sum(len(flows) for flows in all_flows.values())
-        clipped_count = sum(
-            1 for flows in all_flows.values()
-            for f in flows if f.is_clipped
-        )
         path_lengths = [
-            len(f.path)
+            len(flows)
             for flows in all_flows.values()
-            for f in flows
         ]
 
         print(f"States with flows : {len(all_flows)}")
         print(f"Total flows       : {total_flows}")
-        print(f"Clipped flows     : {clipped_count}")
         print(f"Min path length   : {min(path_lengths)}")
         print(f"Max path length   : {max(path_lengths)}")
         print(f"Avg path length   : {sum(path_lengths) / len(path_lengths):.1f}")
@@ -75,40 +69,19 @@ async def main(session_id: str) -> None:
         errors: list[str] = []
 
         for state_hash, flows in all_flows.items():
-            if len(flows) == 0:
-                errors.append(f"State {state_hash[:8]} has empty flow list")
+            if not flows:
+                errors.append(f"State {state_hash[:8]} has no flows")
                 continue
 
-            if len(flows) > 3:
-                errors.append(f"State {state_hash[:8]} has {len(flows)} flows — exceeds max_paths_per_state=3")
+            for flow in flows:
+                if len(flow.transition_refs) > 20:
+                    errors.append(f"State {state_hash[:8]} has a long path ({len(flow.transition_refs)} steps)")
 
-            for i, flow in enumerate(flows):
-                path_hashes = [step.state_hash for step in flow.path]
+                if len(set(flow.transition_refs)) != len(flow.transition_refs):
+                    errors.append(f"State {state_hash[:8]} has duplicate states in its path (loop detected)")
 
-                # No loops
-                if len(path_hashes) != len(set(path_hashes)):
-                    errors.append(f"State {state_hash[:8]} flow {i}: duplicate state in path (loop detected)")
-
-                # Path ends at target
-                if path_hashes[-1] != state_hash:
-                    errors.append(f"State {state_hash[:8]} flow {i}: path does not end at target state")
-
-                # Checkpoint is first step
-                if flow.path[0].state_hash != flow.checkpoint:
-                    errors.append(f"State {state_hash[:8]} flow {i}: checkpoint mismatch with path[0]")
-
-                # First step has no transition (it's the checkpoint)
-                if flow.path[0].transition is not None:
-                    errors.append(f"State {state_hash[:8]} flow {i}: path[0] should have transition=None")
-
-                # All other steps have a transition
-                for j, step in enumerate(flow.path[1:], 1):
-                    if step.transition is None:
-                        errors.append(f"State {state_hash[:8]} flow {i}: step {j} missing transition")
-
-                # Max depth
-                if len(flow.path) > 20:
-                    errors.append(f"State {state_hash[:8]} flow {i}: path length {len(flow.path)} exceeds max_depth=20")
+                if flow.checkpoint_hash and flow.checkpoint_hash in flow.transition_refs:
+                    errors.append(f"State {state_hash[:8]} has checkpoint {flow.checkpoint_hash[:8]} in its path (checkpoint reset failed)")
 
         # ----------------------------------------------------------------
         # Serialization check
@@ -123,18 +96,12 @@ async def main(session_id: str) -> None:
             errors.append(f"Serialization failed: {e}")
 
         # ----------------------------------------------------------------
-        # Sample output — first flow for first 3 states
+        # Sample output print
         # ----------------------------------------------------------------
         print("\n---all flows for all states ---")
         for state_hash, flows in list(all_flows.items()):
             for flow in flows:
-                print(f"\nTarget : {state_hash}")
-                print(f"Clipped: {flow.is_clipped}  |  Checkpoint: {flow.checkpoint}")
-                print(f"Steps  : {len(flow.path)}")
-                for j, step in enumerate(flow.path):
-                    action = step.transition.get("action_type", "-") if step.transition else "checkpoint"
-                    desc = step.transition.get("action_description", "") if step.transition else ""
-                    print(f"  [{j}] {action:12} {step.state_hash}  {desc}")
+                print(f"State {state_hash} <- checkpoint {flow.checkpoint_hash} via {[t for t in flow.transition_refs]}")
 
         # ----------------------------------------------------------------
         # Result
