@@ -1,47 +1,18 @@
-"""
-Find all simple paths from the root to every reachable
-state in one DFS pass, clipped at the deepest checkpoint along each path.
-
-Usage:
-    from src.graph.flow_finder import find_all_flows
-
-    all_flows = await find_all_flows(
-        graph_repo,
-        session_id="...",
-        max_paths_per_state=3,   
-        max_depth=20,     
-    )
-
-Returns:
-    dict[state_hash, list[FlowPath]]
-
-Each FlowPath has:
-    .path        - steps from checkpoint → state as list of FlowStep
-    .checkpoint  - state_hash of the path origin
-    .is_clipped  - False when checkpoint == root
-"""
-
 from __future__ import annotations
 
 import logging
+from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-
-@dataclass
-class FlowStep:
-    """One step in a path: arrive at `state_hash` via `transition`."""
-    state_hash: str
-    transition: dict[str, Any] | None  
-
-
 @dataclass
 class FlowPath:
-    path: list[FlowStep]
-    checkpoint: str
-    is_clipped: bool
+    """Lightweight flow containing only transition IDs and its origin checkpoint."""
+    transition_refs: list[str]
+    checkpoint_hash: str
+
 
 async def find_all_flows(
     graph_repo,
@@ -51,82 +22,71 @@ async def find_all_flows(
     max_depth: int = 20,
 ) -> dict[str, list[FlowPath]]:
     """
-    Single DFS pass over the session graph.
-    Returns all flows for all reachable states.
+    Finds up to max_paths_per_state unique flows to each state, 
+    starting from checkpoint states and the root.
     """
-    raw = await graph_repo.get_state_graph_with_checkpoints(session_id)
+    raw = await graph_repo.get_lightweight_flow_graph(session_id)
 
-    states: dict[str, dict] = {s["state_hash"]: s for s in raw["states"]}
-    transitions: list[dict] = [
-        t for t in raw["transitions"]
-        if t.get("source_hash") and t.get("target_hash")
-    ]
-
-    if not states:
+    states_info: dict[str, dict] = {s["state_hash"]: s for s in raw.get("states", [])}
+    
+    if not states_info:
         logger.warning("No states found for session %s", session_id)
         return {}
 
-    root_hash = _find_root(states)
-    if root_hash is None:
-        logger.warning("Could not determine root state for session %s", session_id)
-        return {}
+    checkpoint_states = {h for h, s in states_info.items() if s.get("is_checkpoint")}
+    root_hash = _find_root(states_info)
     
-    logger.info("Root state for session %s: %s", session_id, root_hash)
+    starting_sources = set(checkpoint_states)
+    if root_hash:
+        starting_sources.add(root_hash)
+        logger.info("Root state for session %s: %s", session_id, root_hash)
 
-    checkpoint_states = {h for h, s in states.items() if s.get("is_checkpoint")}
-
-    adjacency: dict[str, list[tuple[str, dict]]] = {h: [] for h in states}
+    adjacency: dict[str, list[tuple[str, str]]] = {h: [] for h in states_info}
     seen_edges: set[tuple[str, str]] = set()
-    for t in transitions:
-        src, tgt = t["source_hash"], t["target_hash"]
-        if src not in adjacency:
-            continue
-        edge = (src, tgt)
-        if edge in seen_edges:
-            continue
-        seen_edges.add(edge)
-        adjacency[src].append((tgt, t))
-
-    result: dict[str, list[FlowPath]] = {h: [] for h in states}
-
-    root_step = FlowStep(state_hash=root_hash, transition=None)
-
-    stack: list[tuple[str, list[FlowStep], set[str]]] = [
-        (root_hash, [root_step], {root_hash})
-    ]
-
-    while stack:
-        current, path, path_visited = stack.pop()
+    
+    for t in raw.get("transitions", []):
+        src = t.get("source_hash")
+        tgt = t.get("target_hash")
+        trans_id = t.get("transition_id")
         
+        if src and tgt and trans_id:
+            edge = (src, tgt)
+            if edge not in seen_edges:
+                seen_edges.add(edge)
+                adjacency[src].append((tgt, trans_id))
+
+    result: dict[str, list[FlowPath]] = {h: [] for h in states_info}
+    recorded_sources_per_state: dict[str, set[str]] = {h: set() for h in states_info}
+
+    # Queue stores: (current_state_hash, origin_checkpoint_hash, path_of_trans_ids, visited_states_set)
+    queue = deque()
+    for source in starting_sources:
+        if source in states_info:
+            queue.append((source, source, [], {source}))
+
+    while queue:
+        current, origin_cp, path, visited = queue.popleft()
+        # if this node is already a checkpoint, we should stop as we already flooded and started from it
+        if(current in checkpoint_states and current != origin_cp):
+            continue
         if len(path) >= max_depth:
             continue
 
-        for neighbor_hash, transition in adjacency.get(current, []):
-            if neighbor_hash in path_visited:
+        for neighbor_hash, transition_id in adjacency.get(current, []):
+            if neighbor_hash in visited:
                 continue
-            new_visited = path_visited | {neighbor_hash}
+            arrival_path = path + [transition_id]
 
-            if neighbor_hash in checkpoint_states:
-                arrival_path = path + [FlowStep(state_hash=neighbor_hash, transition=transition)]
+            if origin_cp not in recorded_sources_per_state[neighbor_hash]:
                 if len(result[neighbor_hash]) < max_paths_per_state:
-                    checkpoint_hash = arrival_path[0].state_hash
                     result[neighbor_hash].append(FlowPath(
-                        path=arrival_path,
-                        checkpoint=checkpoint_hash,
-                        is_clipped=checkpoint_hash != root_hash,
+                        transition_refs=arrival_path,
+                        checkpoint_hash=origin_cp,
                     ))
-                new_path = [FlowStep(state_hash=neighbor_hash, transition=None)]
-            else:
-                new_path = path + [FlowStep(state_hash=neighbor_hash, transition=transition)]
-                if len(result[neighbor_hash]) < max_paths_per_state:
-                    checkpoint_hash = new_path[0].state_hash
-                    result[neighbor_hash].append(FlowPath(
-                        path=new_path,
-                        checkpoint=checkpoint_hash,
-                        is_clipped=checkpoint_hash != root_hash,
-                    ))
+                    recorded_sources_per_state[neighbor_hash].add(origin_cp)
 
-            stack.append((neighbor_hash, new_path, new_visited))
+            new_visited = visited | {neighbor_hash}
+            queue.append((neighbor_hash, origin_cp, arrival_path, new_visited))
 
     final = {h: flows for h, flows in result.items() if flows}
 
@@ -147,10 +107,6 @@ def _find_root(states: dict[str, dict]) -> str | None:
     with_ts = [(h, s) for h, s in states.items() if s.get("first_seen") is not None]
     if with_ts:
         return min(with_ts, key=lambda x: x[1]["first_seen"])[0]
-    
-    for h, s in states.items():
-        if s.get("checkpoint_kind") == "initial":
-            return h
         
     return next(iter(states), None)
 
@@ -158,22 +114,15 @@ def _find_root(states: dict[str, dict]) -> str | None:
 
 def _serialize_all_flows(all_flows: dict[str, list[FlowPath]]) -> dict[str, list[dict]]:
     """
-    output to plain dicts for JSON transport.
-    Shape: { state_hash: [ { checkpoint, is_clipped, path: [FlowStep] } ] }
+    Outputs highly compressed plain dicts for JSON transport.
+    Shape: { state_hash: [ { checkpoint_hash, transition_refs: [str] } ] }
     """
     result: dict[str, list[dict]] = {}
     for state_hash, flows in all_flows.items():
         result[state_hash] = [
             {
-                "checkpoint": flow.checkpoint,
-                "is_clipped": flow.is_clipped,
-                "path": [
-                    {
-                        "state_hash": step.state_hash,
-                        "transition": step.transition,
-                    }
-                    for step in flow.path
-                ],
+                "checkpoint": flow.checkpoint_hash,
+                "transition_refs": flow.transition_refs,
             }
             for flow in flows
         ]
