@@ -8,14 +8,14 @@ from src.crawler.fingerprints import (
     transition_fingerprint,
 )
 from src.crawler.replay import StateReplayInfo
-from src.crawler.session.types import DeferredWorkItem
 from src.crawler.session.sequence_builders import (
     sequence_description,
-    sequence_value_for_graph,
     sequence_digest,
+    sequence_value_for_graph,
 )
-from src.utils import is_http_url, is_same_domain, normalize_url, normalize_checkpoint_url
+from src.crawler.session.types import DeferredWorkItem
 from src.models import AbstractState, AbstractTransition, CrawlAction
+from src.utils import is_http_url, is_same_domain, normalize_checkpoint_url, normalize_url
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +37,7 @@ class CrawlSessionSequenceMixin:
         primary.metadata["sequence_digest"] = sequence_digest(actions)
         primary.metadata["sequence_len"] = len(actions)
 
-        scope_url = normalize_url(
-            getattr(source, "url", "") or source_info.checkpoint_url or ""
-        )
+        scope_url = normalize_url(getattr(source, "url", "") or source_info.checkpoint_url or "")
 
         action_key = action_key_fingerprint(primary)
 

@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from src.browser import BrowserEngine
-from src.utils import element_display_hint
-from src.crawler.input_resolver import InputValueResolver
 from src.crawler.enums import ActionType, HtmlTag, InputType
+from src.crawler.input_resolver import InputValueResolver
 from src.models import AbstractTransition, CrawlAction
+from src.utils import element_display_hint
 
 
 class EventExecutor:
@@ -63,9 +63,7 @@ class EventExecutor:
         except Exception as e:
             target = action.selector or action.value
 
-            raise RuntimeError(
-                f"Failed to execute {action.action_type} on {target}: {e}"
-            ) from e
+            raise RuntimeError(f"Failed to execute {action.action_type} on {target}: {e}") from e
 
     def plan_form_submission(self, form: dict) -> list[CrawlAction] | None:
         submit = form.get("submit")

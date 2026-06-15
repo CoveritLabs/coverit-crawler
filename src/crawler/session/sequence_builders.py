@@ -1,6 +1,7 @@
 from typing import List
-from src.utils import stable_json_dumps
+
 from src.models import CrawlAction
+from src.utils import stable_json_dumps
 
 
 def sequence_description(actions: List[CrawlAction]) -> str:

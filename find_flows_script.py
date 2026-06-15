@@ -1,4 +1,3 @@
-
 """
 Run this from the coverit-crawler root after populating Neo4j via example_usage.py.
 this script is to call find_all_flows() for a given session and print the results, for testing/debugging purposes
@@ -24,11 +23,11 @@ import sys
 
 
 async def main(session_id: str) -> None:
-    from src.graph.factory import create_graph
     from src.config import config
-    from src.graph.flow_finder import find_all_flows, _serialize_all_flows
+    from src.graph.factory import create_graph
+    from src.graph.flow_finder import _serialize_all_flows, find_all_flows
 
-    print(f"\nConnecting to Neo4j...")
+    print("\nConnecting to Neo4j...")
     client, graph_repo = await create_graph(
         config.NEO4J_URI,
         config.NEO4J_USER,
@@ -52,10 +51,7 @@ async def main(session_id: str) -> None:
         # Basic stats
         # ----------------------------------------------------------------
         total_flows = sum(len(flows) for flows in all_flows.values())
-        path_lengths = [
-            len(flows)
-            for flows in all_flows.values()
-        ]
+        path_lengths = [len(flows) for flows in all_flows.values()]
 
         print(f"States with flows : {len(all_flows)}")
         print(f"Total flows       : {total_flows}")

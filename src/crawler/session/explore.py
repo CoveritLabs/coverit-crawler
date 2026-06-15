@@ -2,20 +2,20 @@ from __future__ import annotations
 
 import logging
 
+from src.crawler import ActionType, HtmlTag, InputType
 from src.crawler.replay import StateReplayInfo
 from src.crawler.session.types import DeferredWorkItem
-from src.crawler import ActionType, HtmlTag, InputType
 from src.models import AbstractState, CrawlAction
-from src.utils import is_non_http_href
 from src.utils import (
+    element_label,
     element_tag,
     element_tag_hint,
     element_type,
+    is_button,
+    is_non_http_href,
     is_text_input,
-    element_label,
     supports_enter_submission,
     text_input_label,
-    is_button,
 )
 
 logger = logging.getLogger(__name__)
@@ -34,21 +34,17 @@ class CrawlSessionExploreMixin:
             current.url = await self.browser.get_current_url()
 
             storage_state = await self.browser.export_storage_state()
-            
+
             new_info = StateReplayInfo(
                 checkpoint_url=current.url,
                 checkpoint_state_hash=current.state_hash,
                 checkpoint_kind="post_login",
                 storage_state=storage_state,
             )
-            
+
             self.replayer.register(current.state_hash, new_info)
-            
-            await self._persist_replay_artifacts(
-                state_hash=current.state_hash,
-                info=new_info,
-                persist_storage_state=True
-            )
+
+            await self._persist_replay_artifacts(state_hash=current.state_hash, info=new_info, persist_storage_state=True)
 
         current_info = self._get_current_state_info(current)
 
@@ -154,7 +150,7 @@ class CrawlSessionExploreMixin:
 
         if element.get("in_form"):
             return False
-        
+
         return not self._is_blocked_anchor(element)
 
     def _plan_element_sequences(
@@ -192,16 +188,10 @@ class CrawlSessionExploreMixin:
     ) -> list[list[CrawlAction]]:
         sequences: list[list[CrawlAction]] = []
 
-        options = [
-            option
-            for option in element.get("options", [])
-            if option.get("value")
-        ]
+        options = [option for option in element.get("options", []) if option.get("value")]
 
         for option in options[: self._settings.MAX_SELECT_OPTIONS_PER_ELEMENT]:
-            option_text = str(
-                option.get("text") or option.get("value") or ""
-            ).strip()
+            option_text = str(option.get("text") or option.get("value") or "").strip()
 
             sequences.append(
                 [
@@ -209,11 +199,7 @@ class CrawlSessionExploreMixin:
                         action_type=ActionType.SELECT,
                         selector=selector,
                         value=str(option["value"]),
-                        description=(
-                            f"Select '{option_text}' in "
-                            f"{element_tag_hint(element)}"
-                            f"{element_label(element, selector)}"
-                        ),
+                        description=(f"Select '{option_text}' in {element_tag_hint(element)}{element_label(element, selector)}"),
                         metadata={
                             "option": str(option.get("text", "")),
                             "frame": element.get("frame"),
@@ -236,10 +222,7 @@ class CrawlSessionExploreMixin:
                 CrawlAction(
                     action_type=ActionType.CLICK,
                     selector=selector,
-                    description=(
-                        f"Toggle {input_type} "
-                        f"{element_label(element, selector)}"
-                    ),
+                    description=(f"Toggle {input_type} {element_label(element, selector)}"),
                     metadata={
                         "type": input_type,
                         "frame": element.get("frame"),
@@ -302,11 +285,7 @@ class CrawlSessionExploreMixin:
                 CrawlAction(
                     action_type=ActionType.CLICK,
                     selector=selector,
-                    description=(
-                        f"Click link "
-                        f"{element_label(element, selector)}"
-                        f"{href_part}"
-                    ),
+                    description=(f"Click link {element_label(element, selector)}{href_part}"),
                     metadata={"frame": element.get("frame")},
                 )
             ]
@@ -322,10 +301,7 @@ class CrawlSessionExploreMixin:
                 CrawlAction(
                     action_type=ActionType.CLICK,
                     selector=selector,
-                    description=(
-                        f"Click button "
-                        f"{element_label(element, selector)}"
-                    ),
+                    description=(f"Click button {element_label(element, selector)}"),
                     metadata={"frame": element.get("frame")},
                 )
             ]
@@ -341,11 +317,7 @@ class CrawlSessionExploreMixin:
                 CrawlAction(
                     action_type=ActionType.CLICK,
                     selector=selector,
-                    description=(
-                        f"Click "
-                        f"{element_tag_hint(element)}"
-                        f"{element_label(element, selector)}"
-                    ),
+                    description=(f"Click {element_tag_hint(element)}{element_label(element, selector)}"),
                     metadata={"frame": element.get("frame")},
                 )
             ]
@@ -391,10 +363,7 @@ class CrawlSessionExploreMixin:
         action: CrawlAction,
         element: dict | None,
     ) -> bool:
-        return (
-            self._settings.DEFER_DESTRUCTIVE_ACTIONS
-            and self._risk.is_risky(action, element=element)
-        )
+        return self._settings.DEFER_DESTRUCTIVE_ACTIONS and self._risk.is_risky(action, element=element)
 
     def _defer_work(
         self,
@@ -411,16 +380,9 @@ class CrawlSessionExploreMixin:
         )
 
     def _is_blocked_anchor(self, element: dict) -> bool:
-        if (
-            element_tag(element) != HtmlTag.ANCHOR
-            or self._settings.CLICK_NON_HTTP_LINKS
-        ):
+        if element_tag(element) != HtmlTag.ANCHOR or self._settings.CLICK_NON_HTTP_LINKS:
             return False
 
         href = str(element.get("href", "") or "")
 
         return is_non_http_href(href)
-
-
-
-

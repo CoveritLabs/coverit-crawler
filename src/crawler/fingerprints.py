@@ -1,8 +1,8 @@
 import hashlib
 from typing import Any
 
-from src.utils import stable_json_dumps
 from src.models import CrawlAction
+from src.utils import stable_json_dumps
 
 
 def action_attempt_fingerprint(source_state_hash: str, action: CrawlAction) -> str:

@@ -5,11 +5,11 @@ import logging
 from collections import deque
 from uuid import uuid4
 
-from src.browser import BrowserEngine
 from src import Config, config
+from src.browser import BrowserEngine
 from src.crawler.action_limits import ActionRepeatLimiter
 from src.crawler.executor import EventExecutor
-from src.crawler.replay import StateReplayInfo, StateReplayer
+from src.crawler.replay import StateReplayer, StateReplayInfo
 from src.crawler.risk import RiskClassifier
 from src.crawler.session.types import DeferredWorkItem
 from src.models import AbstractState, AbstractTransition
@@ -51,9 +51,7 @@ class CrawlSessionBase:
         self._seen_transition_ids: set[str] = set()
         self._risk = risk_classifier or RiskClassifier.from_settings(settings)
         self._login_attempts = 0
-        self._action_repeat_limiter = ActionRepeatLimiter(
-            max_repeats_per_scope=int(getattr(settings, "MAX_ACTION_REPEATS_PER_URL", 2))
-        )
+        self._action_repeat_limiter = ActionRepeatLimiter(max_repeats_per_scope=int(getattr(settings, "MAX_ACTION_REPEATS_PER_URL", 2)))
 
         self.browser = browser or BrowserEngine(
             headless=self.headless,
@@ -63,9 +61,7 @@ class CrawlSessionBase:
         self.executor: EventExecutor | None = None
         self.replayer: StateReplayer | None = None
         self._max_states: int = int(max_states if max_states is not None else getattr(settings, "MAX_STATES", 1000))
-        self._max_transitions: int = int(
-            max_transitions if max_transitions is not None else getattr(settings, "MAX_TRANSITIONS", 5000)
-        )
+        self._max_transitions: int = int(max_transitions if max_transitions is not None else getattr(settings, "MAX_TRANSITIONS", 5000))
         self._state_count: int = 0
         self._transition_count: int = 0
 

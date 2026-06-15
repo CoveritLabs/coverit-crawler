@@ -1,6 +1,5 @@
 from neo4j import AsyncDriver
 
-
 STATE_CONSTRAINT = """
 CREATE CONSTRAINT state_unique IF NOT EXISTS
 FOR (s:State)

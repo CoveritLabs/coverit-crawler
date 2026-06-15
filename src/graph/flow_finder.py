@@ -3,13 +3,14 @@ from __future__ import annotations
 import logging
 from collections import deque
 from dataclasses import dataclass
-from typing import Any
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class FlowPath:
     """Lightweight flow containing only transition IDs and its origin checkpoint."""
+
     transition_refs: list[str]
     checkpoint_hash: str
 
@@ -22,20 +23,20 @@ async def find_all_flows(
     max_depth: int = 20,
 ) -> dict[str, list[FlowPath]]:
     """
-    Finds up to max_paths_per_state unique flows to each state, 
+    Finds up to max_paths_per_state unique flows to each state,
     starting from checkpoint states and the root.
     """
     raw = await graph_repo.get_lightweight_flow_graph(session_id)
 
     states_info: dict[str, dict] = {s["state_hash"]: s for s in raw.get("states", [])}
-    
+
     if not states_info:
         logger.warning("No states found for session %s", session_id)
         return {}
 
     checkpoint_states = {h for h, s in states_info.items() if s.get("is_checkpoint")}
     root_hash = _find_root(states_info)
-    
+
     starting_sources = set(checkpoint_states)
     if root_hash:
         starting_sources.add(root_hash)
@@ -43,12 +44,12 @@ async def find_all_flows(
 
     adjacency: dict[str, list[tuple[str, str]]] = {h: [] for h in states_info}
     seen_edges: set[tuple[str, str]] = set()
-    
+
     for t in raw.get("transitions", []):
         src = t.get("source_hash")
         tgt = t.get("target_hash")
         trans_id = t.get("transition_id")
-        
+
         if src and tgt and trans_id:
             edge = (src, tgt)
             if edge not in seen_edges:
@@ -67,7 +68,7 @@ async def find_all_flows(
     while queue:
         current, origin_cp, path, visited = queue.popleft()
         # if this node is already a checkpoint, we should stop as we already flooded and started from it
-        if(current in checkpoint_states and current != origin_cp):
+        if current in checkpoint_states and current != origin_cp:
             continue
         if len(path) >= max_depth:
             continue
@@ -79,10 +80,12 @@ async def find_all_flows(
 
             if origin_cp not in recorded_sources_per_state[neighbor_hash]:
                 if len(result[neighbor_hash]) < max_paths_per_state:
-                    result[neighbor_hash].append(FlowPath(
-                        transition_refs=arrival_path,
-                        checkpoint_hash=origin_cp,
-                    ))
+                    result[neighbor_hash].append(
+                        FlowPath(
+                            transition_refs=arrival_path,
+                            checkpoint_hash=origin_cp,
+                        )
+                    )
                     recorded_sources_per_state[neighbor_hash].add(origin_cp)
 
             new_visited = visited | {neighbor_hash}
@@ -107,9 +110,8 @@ def _find_root(states: dict[str, dict]) -> str | None:
     with_ts = [(h, s) for h, s in states.items() if s.get("first_seen") is not None]
     if with_ts:
         return min(with_ts, key=lambda x: x[1]["first_seen"])[0]
-        
-    return next(iter(states), None)
 
+    return next(iter(states), None)
 
 
 def _serialize_all_flows(all_flows: dict[str, list[FlowPath]]) -> dict[str, list[dict]]:

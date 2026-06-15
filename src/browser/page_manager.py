@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from typing import List, Optional, Callable
+from typing import Callable, List, Optional
 
 from playwright.async_api import (
     BrowserContext,
     Page,
+)
+from playwright.async_api import (
     TimeoutError as PlaywrightTimeoutError,
 )
+
 
 class PageManager:
     def __init__(

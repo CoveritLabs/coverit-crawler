@@ -1,11 +1,11 @@
-import os
 import asyncio
 import logging
+import os
 import uuid
 
 from src.config import config
-from src.graph import create_graph
 from src.crawler.session import CrawlSession
+from src.graph import create_graph
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -16,6 +16,7 @@ BOOKS = "https://books.toscrape.com/"
 OTHER_URL = "https://en.wikipedia.org/wiki/Main_Page"
 X = "https://the-internet.herokuapp.com/challenging_dom"
 WEBSITE_1 = "file:///D:/crawler_test_website/nexus_commerce/index.html"
+
 
 async def main():
     logger.info("Starting CoverIt Crawler...")

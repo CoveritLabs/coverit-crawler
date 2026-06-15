@@ -42,10 +42,7 @@ class FrameResolver:
         if frame_url:
             try:
                 for frame in self._page.frames:
-                    if (
-                        frame.url == frame_url
-                        or frame.url.startswith(frame_url)
-                    ):
+                    if frame.url == frame_url or frame.url.startswith(frame_url):
                         return frame
 
             except Exception:

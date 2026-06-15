@@ -95,9 +95,7 @@ async def mark_finished_at_if_aborted(session: AsyncSession, session_id: str) ->
 async def fetch_job_inputs(session: AsyncSession, session_id: str) -> tuple[dict[str, Any], str]:
     stmt = (
         select(CrawlSession)
-        .options(
-            joinedload(CrawlSession.app_version).joinedload(TargetApplicationVersion.target_application)
-        )
+        .options(joinedload(CrawlSession.app_version).joinedload(TargetApplicationVersion.target_application))
         .where(CrawlSession.crawl_session_id == session_id)
     )
 
