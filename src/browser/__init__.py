@@ -6,23 +6,23 @@ from typing import TYPE_CHECKING, Any
 __all__ = ["BrowserEngine"]
 
 _EXPORTS: dict[str, tuple[str, str]] = {
-	"BrowserEngine": ("src.browser.engine", "BrowserEngine"),
+    "BrowserEngine": ("src.browser.engine", "BrowserEngine"),
 }
 
 
 def __getattr__(name: str) -> Any:
-	target = _EXPORTS.get(name)
-	if target is None:
-		raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-	module_name, attr = target
-	value = getattr(import_module(module_name), attr)
-	globals()[name] = value
-	return value
+    target = _EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attr = target
+    value = getattr(import_module(module_name), attr)
+    globals()[name] = value
+    return value
 
 
 def __dir__() -> list[str]:
-	return sorted(set(globals().keys()) | set(_EXPORTS.keys()))
+    return sorted(set(globals().keys()) | set(_EXPORTS.keys()))
 
 
 if TYPE_CHECKING:
-	from src.browser.engine import BrowserEngine
+    from src.browser.engine import BrowserEngine

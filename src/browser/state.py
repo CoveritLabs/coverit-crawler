@@ -46,6 +46,4 @@ class StateManager:
             normalized,
         ).strip()
 
-        return hashlib.sha256(
-            normalized.encode("utf-8")
-        ).hexdigest()
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()

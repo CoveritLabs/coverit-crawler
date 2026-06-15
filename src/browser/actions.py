@@ -4,7 +4,11 @@ from typing import Awaitable, Callable, Optional
 
 from playwright.async_api import (
     Error as PlaywrightError,
+)
+from playwright.async_api import (
     Page,
+)
+from playwright.async_api import (
     TimeoutError as PlaywrightTimeoutError,
 )
 
@@ -64,9 +68,7 @@ class BrowserActions:
                 except Exception:
                     pass
 
-                await self._wait_for_settle(
-                    load_state="domcontentloaded"
-                )
+                await self._wait_for_settle(load_state="domcontentloaded")
 
         if last_error:
             raise last_error

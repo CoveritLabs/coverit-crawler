@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.utils import stable_json_dumps
 from src.models import CrawlAction
+from src.utils import stable_json_dumps
 
 
 @dataclass

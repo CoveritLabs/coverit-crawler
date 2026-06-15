@@ -12,13 +12,13 @@ from playwright.async_api import (
 
 from src.browser.actions import BrowserActions
 from src.browser.frames import FrameResolver
+from src.browser.js_loader import JsLoader
 from src.browser.page_manager import PageManager
 from src.browser.state import StateManager
 from src.browser.storage_state import normalize_storage_state
-from src.browser.js_loader import JsLoader
 from src.config import Config, config
 from src.models import AbstractState
-from src.utils import build_selector, attach_selectors_to_forms
+from src.utils import attach_selectors_to_forms, build_selector
 
 
 class BrowserEngine:
@@ -32,9 +32,7 @@ class BrowserEngine:
         self.headless = headless
         self.timeout_ms = int(timeout_ms if timeout_ms is not None else settings.TIMEOUT_MS)
 
-        self.page_load_state = str(
-            getattr(settings, "PAGE_LOAD_STATE", "networkidle") or "networkidle"
-        )
+        self.page_load_state = str(getattr(settings, "PAGE_LOAD_STATE", "networkidle") or "networkidle")
 
         self.browser: Optional[Browser] = None
         self.context: Optional[BrowserContext] = None

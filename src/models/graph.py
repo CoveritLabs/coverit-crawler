@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
+
 @dataclass
 class AbstractState:
     """Represents an abstract state in the application state graph."""

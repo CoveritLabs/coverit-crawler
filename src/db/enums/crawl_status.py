@@ -1,5 +1,6 @@
 from enum import Enum
 
+
 class CrawlStatus(str, Enum):
     UNSPECIFIED = "UNSPECIFIED"
     QUEUED = "QUEUED"

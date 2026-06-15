@@ -12,8 +12,8 @@ import os
 
 import aiohttp
 
-from src.graph.flow_finder import find_all_flows, _serialize_all_flows
 from src.graph.factory import get_graph_repo
+from src.graph.flow_finder import _serialize_all_flows, find_all_flows
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +39,7 @@ async def generate_flows_for_session(ctx: dict, session_id: str) -> None:
 
         if not resp.ok:
             body = await resp.text()
-            raise RuntimeError(
-                f"API rejected flows for session {session_id}: {resp.status} {body}"
-            )
+            raise RuntimeError(f"API rejected flows for session {session_id}: {resp.status} {body}")
 
     logger.info(
         "Flow generation complete for session %s (%d states)",

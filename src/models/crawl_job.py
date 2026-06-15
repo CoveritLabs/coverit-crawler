@@ -12,6 +12,7 @@ from src.utils.coercion import coerce_bool, coerce_int, coerce_str
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
+
 def _default_input_config_path() -> str | None:
     candidate = _repo_root() / "src" / "configs" / "input_defaults.json"
     return str(candidate) if candidate.exists() else None

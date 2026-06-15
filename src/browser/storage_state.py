@@ -28,15 +28,11 @@ def parse_storage_state(storage_state: Any) -> dict | None:
             return None
 
         if not isinstance(parsed, dict):
-            raise ValueError(
-                "storage_state JSON must decode to an object"
-            )
+            raise ValueError("storage_state JSON must decode to an object")
 
         return parsed
 
-    raise TypeError(
-        "storage_state must be a dict, JSON string, or bytes"
-    )
+    raise TypeError("storage_state must be a dict, JSON string, or bytes")
 
 
 def normalize_storage_state(

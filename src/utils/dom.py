@@ -1,7 +1,7 @@
 import re
+from typing import Optional
 
 from src.crawler import HtmlTag, InputType
-from typing import Optional
 
 
 def css_escape(value: str) -> str:
@@ -12,7 +12,7 @@ def css_escape(value: str) -> str:
     value = value.replace('"', '\\"')
     value = value.replace("'", "\\'")
 
-    return re.sub(r'([#.;:[\]()=+>*~|^$ ])', r'\\\1', value)
+    return re.sub(r"([#.;:[\]()=+>*~|^$ ])", r"\\\1", value)
 
 
 def element_tag(element: dict) -> str:
@@ -26,37 +26,24 @@ def element_type(element: dict) -> str:
 def is_text_input(element: dict) -> bool:
     tag = element_tag(element)
 
-    return (
-        tag in (HtmlTag.INPUT, HtmlTag.TEXTAREA)
-        or element.get("contenteditable")
-    )
+    return tag in (HtmlTag.INPUT, HtmlTag.TEXTAREA) or element.get("contenteditable")
 
 
 def is_button(element: dict) -> bool:
     tag = element_tag(element)
     input_type = element_type(element)
 
-    return (
-        tag == HtmlTag.BUTTON
-        or element.get("role") == "button"
-        or (
-            tag == HtmlTag.INPUT
-            and input_type in (InputType.SUBMIT, InputType.BUTTON)
-        )
-    )
+    return tag == HtmlTag.BUTTON or element.get("role") == "button" or (tag == HtmlTag.INPUT and input_type in (InputType.SUBMIT, InputType.BUTTON))
+
 
 def supports_enter_submission(element: dict) -> bool:
-    return (
-        element_tag(element) == HtmlTag.INPUT
-        and element_type(element)
-        in (
-            "text",
-            "search",
-            "email",
-            "tel",
-            "url",
-            "number",
-        )
+    return element_tag(element) == HtmlTag.INPUT and element_type(element) in (
+        "text",
+        "search",
+        "email",
+        "tel",
+        "url",
+        "number",
     )
 
 
@@ -64,11 +51,7 @@ def element_tag_hint(element: dict) -> str:
     tag = element_tag(element)
     input_type = element_type(element)
 
-    if (
-        tag == HtmlTag.INPUT
-        and input_type
-        and input_type not in ("text", "search")
-    ):
+    if tag == HtmlTag.INPUT and input_type and input_type not in ("text", "search"):
         return f"{tag}[{input_type}] "
 
     return f"{tag} " if tag else ""
@@ -85,15 +68,11 @@ def text_input_label(element: dict) -> str:
 
     return "field"
 
+
 def element_label(element: dict, selector: str | None = None) -> str:
     parts: list[str] = []
 
-    label = (
-        element.get("aria-label")
-        or element.get("label")
-        or element.get("name")
-        or element.get("title")
-    )
+    label = element.get("aria-label") or element.get("label") or element.get("name") or element.get("title")
 
     text = element.get("innerText") or element.get("text")
 
@@ -111,6 +90,7 @@ def element_label(element: dict, selector: str | None = None) -> str:
         parts.append(f"[{selector}]")
 
     return " ".join(parts).strip()
+
 
 def build_selector(element: dict) -> str | None:
     selector_candidates = element.get("selector_candidates") or []
@@ -131,21 +111,15 @@ def build_selector(element: dict) -> str | None:
     if name:
         return f'[name="{css_escape(str(name))}"]'
 
-    if (
-        tag == HtmlTag.INPUT
-        and input_type in (InputType.SUBMIT, InputType.BUTTON)
-        and value
-    ):
-        return (
-            f'input[type="{input_type}"]'
-            f'[value="{css_escape(str(value))}"]'
-        )
+    if tag == HtmlTag.INPUT and input_type in (InputType.SUBMIT, InputType.BUTTON) and value:
+        return f'input[type="{input_type}"][value="{css_escape(str(value))}"]'
 
     if tag in (HtmlTag.BUTTON, HtmlTag.ANCHOR) and text:
         safe_text = css_escape(text[:80])
         return f'{tag}:has-text("{safe_text}")'
 
     return None
+
 
 def attach_selectors_to_forms(forms: list[dict]) -> list[dict]:
     for form in forms:
@@ -155,6 +129,7 @@ def attach_selectors_to_forms(forms: list[dict]) -> list[dict]:
         if form.get("submit"):
             form["submit"]["selector"] = build_selector(form["submit"])
     return forms
+
 
 def element_display_hint(
     element: dict,
