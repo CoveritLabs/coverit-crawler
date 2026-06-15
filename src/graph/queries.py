@@ -43,7 +43,7 @@ DETACH DELETE s
 GET_LIGHTWEIGHT_FLOW_GRAPH = """
 MATCH (s:State {session_id: $session_id})
 OPTIONAL MATCH (s)-[t:TRANSITION]->(target:State)
-RETURN 
+RETURN
     collect(DISTINCT {
         state_hash: s.state_hash,
         is_checkpoint: s.is_checkpoint,
@@ -54,4 +54,21 @@ RETURN
         target_hash: target.state_hash,
         transition_id: t.transition_id
     }) AS transitions
+"""
+
+GET_DATA_FROM_FLOW_QUERY = """
+MATCH (s:State {state_hash: $checkpoint_hash})
+WITH s.checkpoint_url AS checkpoint_url,
+     s.checkpoint_storage_state_json AS checkpoint_storage_state_json
+UNWIND $transition_refs AS ref
+MATCH ()-[t:TRANSITION {transition_id: ref}]->()
+RETURN checkpoint_url,
+       checkpoint_storage_state_json,
+       collect({
+         transition_id: t.transition_id,
+         action_type: t.action_type,
+         selector: t.locator_value,
+         value: t.action_value,
+         description: t.action_description
+       }) AS transitions
 """

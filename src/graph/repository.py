@@ -7,6 +7,7 @@ from src.graph.queries import (
     ADD_TRANSITION,
     CLEAR_SESSION,
     GET_ACTIONS,
+    GET_DATA_FROM_FLOW_QUERY,
     GET_GRAPH,
     GET_LIGHTWEIGHT_FLOW_GRAPH,
     SET_STATE_PROPS,
@@ -92,10 +93,31 @@ class GraphRepository:
         async with self._driver.session() as session:
             await session.run(CLEAR_SESSION, session_id=session_id)
 
+
     async def get_lightweight_flow_graph(self, session_id: str) -> dict:
         async with self._driver.session() as session:
+            result = await session.run(GET_LIGHTWEIGHT_FLOW_GRAPH, session_id=session_id)
             result = await session.run(GET_LIGHTWEIGHT_FLOW_GRAPH, session_id=session_id)
             record = await result.single()
             if not record:
                 return {"states": [], "transitions": []}
             return record.data()
+
+    async def get_data_from_flow_query(
+        self,
+        checkpoint_hash: str,
+        transition_refs: list[str],
+    ) -> tuple[str | None, Any, list[dict[str, Any]]]:
+        async with self._driver.session() as session:
+            result = await session.run(
+                GET_DATA_FROM_FLOW_QUERY,
+                checkpoint_hash=checkpoint_hash,
+                transition_refs=transition_refs,
+            )
+            record = await result.single()
+            if not record:
+                return None, None, []
+            checkpoint_url = record.get("checkpoint_url")
+            checkpoint_storage_state_json = record.get("checkpoint_storage_state_json")
+            transitions = record.get("transitions", [])
+            return checkpoint_url, checkpoint_storage_state_json, transitions

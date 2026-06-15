@@ -8,11 +8,12 @@ Single pass:
 from __future__ import annotations
 
 import logging
+from logging import config
 import os
-
+from src.config import config
 import aiohttp
 
-from src.graph.factory import get_graph_repo
+from src.graph.factory import create_graph
 from src.graph.flow_finder import _serialize_all_flows, find_all_flows
 
 logger = logging.getLogger(__name__)
@@ -21,9 +22,13 @@ _API_BASE_URL = os.environ["COVERIT_API_INTERNAL_URL"].rstrip("/")
 
 
 async def generate_flows_for_session(ctx: dict, session_id: str) -> None:
-    graph_repo = await get_graph_repo()
+    _, graph = await create_graph(
+        config.NEO4J_URI,
+        config.NEO4J_USER,
+        config.NEO4J_PASSWORD,
+    )
 
-    all_flows = await find_all_flows(graph_repo, session_id=session_id)
+    all_flows = await find_all_flows(graph, session_id=session_id)
 
     if not all_flows:
         logger.info("No flows found for session %s — skipping", session_id)
