@@ -17,12 +17,13 @@ dependencies = [
   "coverit-contracts",
   "sqlalchemy>=2.0.0",
   "aiohttp>=3.8.0",
+  "ruff>=0.15.17",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pre-commit>=3.7.0",
-  "ruff>=0.6.9",
+  "ruff>=0.15.17",
   "pytest>=8.3.0",
   "pytest-asyncio>=0.24.0",
 ]
@@ -36,3 +37,42 @@ include = ["src", "src.*"]
 
 [tool.uv]
 extra-index-url = ["https://coveritlabs.github.io/coverit-contracts/simple/"]
+
+# ==============================================================================
+# NEW AUTOMATED QUALITY CONTROLS ADDED BELOW
+# ==============================================================================
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+# E/F = standard errors, I = strict import orders, B = bugs, C4/SIM = bad code smells
+select = ["E", "F", "I", "B", "C4", "SIM"]
+fixable = ["ALL"]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+lines-after-imports = 2
+
+[tool.pyright]
+include = ["src", "find_flows_script.py"]
+exclude = [
+    "**/__pycache__",
+    "**/.*",
+    ".venv",
+    ".uv",
+    "**/node_modules",
+]
+typeCheckingMode = "standard"
+reportMissingImports = "error"
+reportMissingModuleSource = "error"
+reportUndefinedVariable = "error"
+reportUnknownMemberType = "warning"
+reportUnknownVariableType = "warning"
+reportUnknownArgumentType = "warning"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.410",
+]

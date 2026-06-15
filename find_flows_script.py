@@ -86,6 +86,9 @@ async def main(session_id: str) -> None:
             serialized = _serialize_all_flows(all_flows)
             json_str = json.dumps(serialized)
             reparsed = json.loads(json_str)
+            # save the json, even if file doesntt exist, for inspection
+            with open("all_flows.json", "w", encoding="utf-8") as f:
+                f.write(json_str)
             assert len(reparsed) == len(all_flows), "Serialized state count mismatch"
             print(f"\nSerialized payload size: {len(json_str) / 1024:.1f} KB")
         except Exception as e:
