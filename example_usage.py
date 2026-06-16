@@ -31,11 +31,11 @@ async def main():
         crawl_session_id = str(uuid.uuid4())
         config_path = os.path.join(os.path.dirname(__file__), "src", "configs", "input_defaults.json")
         session = CrawlSession(
-            base_url=WEBSITE_1,
+            base_url=QUOTES,
             graph_builder=graph,
             config_path=config_path,
             session_id=crawl_session_id,
-            headless=False,
+            headless=config.HEADLESS,
         )
 
         logger.info("Starting crawl...")

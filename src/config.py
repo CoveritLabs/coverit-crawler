@@ -48,6 +48,12 @@ class Config:
     DEFER_DESTRUCTIVE_ACTIONS: bool
     DESTRUCTIVE_KEYWORDS: str
 
+    USE_SEMANTIC_DIVERSITY: bool
+    SEMANTIC_DIVERSITY_THRESHOLD: float
+    SEMANTIC_UNCERTAINTY_MARGIN: float
+    SEMANTIC_MAX_BANK_SIZE: int
+    SEMANTIC_ARTIFACT_DIR: str
+
     DATABASE_URL: str | None
     REDIS_URL: str | None
 
@@ -61,7 +67,7 @@ class Config:
             TIMEOUT_MS=_env_int("TIMEOUT_MS", 3000),
             MAX_STATES=_env_int("MAX_STATES", 1000),
             MAX_TRANSITIONS=_env_int("MAX_TRANSITIONS", 5000),
-            MAX_ELEMENTS_PER_STATE=_env_int("MAX_ELEMENTS_PER_STATE", 70),
+            MAX_ELEMENTS_PER_STATE=_env_int("MAX_ELEMENTS_PER_STATE", 5),
             MAX_SELECT_OPTIONS_PER_ELEMENT=_env_int("MAX_SELECT_OPTIONS_PER_ELEMENT", 3),
             MAX_ACTION_REPEATS_PER_URL=_env_int("MAX_ACTION_REPEATS_PER_URL", 2),
             ACTION_RETRY_COUNT=_env_int("ACTION_RETRY_COUNT", 1),
@@ -77,6 +83,14 @@ class Config:
                 "DESTRUCTIVE_KEYWORDS",
                 "logout,log out,sign out,delete,remove,unsubscribe,cancel,checkout,pay,purchase,order,place order,reset,deactivate,terminate,drop,empty cart,clear cart",
             ),
+            SEMANTIC_DIVERSITY_THRESHOLD=float(os.getenv("SEMANTIC_DIVERSITY_THRESHOLD", "0.90")),
+            SEMANTIC_UNCERTAINTY_MARGIN=float(os.getenv("SEMANTIC_UNCERTAINTY_MARGIN", "0.05")),
+            SEMANTIC_MAX_BANK_SIZE=_env_int("SEMANTIC_MAX_BANK_SIZE", 1000),
+            SEMANTIC_ARTIFACT_DIR=os.getenv(
+                "SEMANTIC_ARTIFACT_DIR",
+                os.path.join(os.path.dirname(__file__), "models", "semantic"),
+            ),
+            USE_SEMANTIC_DIVERSITY=_env_bool("USE_SEMANTIC_DIVERSITY", "true"),
             DATABASE_URL=os.getenv("DATABASE_URL") or None,
             REDIS_URL=os.getenv("REDIS_URL") or None,
         )

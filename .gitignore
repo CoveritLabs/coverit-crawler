@@ -39,3 +39,6 @@ coverage
 
 **/__pycache__/
 /src/generated/prisma
+data/semantic_pipeline/
+data/semantic_source_archive/
+src/models/semantic/*.joblib

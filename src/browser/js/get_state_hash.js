@@ -28,6 +28,21 @@
         return out;
     };
 
+    const normalizeComparableUrl = (value) => {
+        return String(value || "")
+            .trim()
+            .replace(/^https?:\/\//i, "//")
+            .replace(/[?#]$/, "");
+    };
+
+    const normalizeComparableText = (value) => {
+        return String(value || "")
+            .replace(/https?:\/\//ig, "//")
+            .toLowerCase()
+            .trim()
+            .replace(/\s+/g, " ");
+    };
+
     const allDocs = [document];
     for (const iframe of Array.from(document.querySelectorAll("iframe"))) {
         try {
@@ -45,7 +60,7 @@
         } catch {
         }
     }
-    const pageText = textParts.join("\n").toLowerCase().trim().replace(/\s+/g, " ");
+    const pageText = normalizeComparableText(textParts.join("\n"));
 
     const interactiveSelector = "button, a[href], input, select, textarea, [role='button'], [onclick], [contenteditable]";
     const sigs = [];
@@ -65,7 +80,7 @@
             const readonly = !!el.readOnly;
             const required = !!el.required;
             const checked = (type === "checkbox" || type === "radio") ? !!el.checked : false;
-            const href = tag === "a" ? (el.href || "") : "";
+            const href = tag === "a" ? normalizeComparableUrl(el.href) : "";
 
             let selected = "";
             if (tag === "select") {

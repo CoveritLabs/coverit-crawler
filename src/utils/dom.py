@@ -14,20 +14,16 @@ def css_escape(value: str) -> str:
 
     return re.sub(r"([#.;:[\]()=+>*~|^$ ])", r"\\\1", value)
 
-
 def element_tag(element: dict) -> str:
     return str(element.get("tag", "") or "").lower()
 
-
 def element_type(element: dict) -> str:
     return str(element.get("type", "") or "").lower()
-
 
 def is_text_input(element: dict) -> bool:
     tag = element_tag(element)
 
     return tag in (HtmlTag.INPUT, HtmlTag.TEXTAREA) or element.get("contenteditable")
-
 
 def is_button(element: dict) -> bool:
     tag = element_tag(element)
@@ -46,7 +42,6 @@ def supports_enter_submission(element: dict) -> bool:
         "number",
     )
 
-
 def element_tag_hint(element: dict) -> str:
     tag = element_tag(element)
     input_type = element_type(element)
@@ -55,7 +50,6 @@ def element_tag_hint(element: dict) -> str:
         return f"{tag}[{input_type}] "
 
     return f"{tag} " if tag else ""
-
 
 def text_input_label(element: dict) -> str:
     input_type = element_type(element)

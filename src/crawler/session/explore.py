@@ -28,31 +28,25 @@ class CrawlSessionExploreMixin:
 
         await self._prepare_state()
 
-        actual_hash = await self.browser.get_state_hash()
-        if actual_hash != current.state_hash:
-            current.state_hash = actual_hash
-            current.url = await self.browser.get_current_url()
-
-            storage_state = await self.browser.export_storage_state()
-
-            new_info = StateReplayInfo(
-                checkpoint_url=current.url,
-                checkpoint_state_hash=current.state_hash,
-                checkpoint_kind="post_login",
-                storage_state=storage_state,
-            )
-
-            self.replayer.register(current.state_hash, new_info)
-
-            await self._persist_replay_artifacts(state_hash=current.state_hash, info=new_info, persist_storage_state=True)
-
         current_info = self._get_current_state_info(current)
 
         if not current_info or not self.executor:
             return
 
+        state_elements = await self.browser.get_interactable_elements()
+
+        if self._semantic_engine:
+            comparison = self._semantic_engine.register_state(
+                current.state_hash,
+                state_elements,
+            )
+            diagnostics = self._semantic_engine.explain_comparison(comparison)
+            logger.debug("State %s: %s", current.state_hash, diagnostics)
+            if not comparison.is_novel and comparison.reason != "already_registered":
+                return
+
         await self._explore_forms(current, current_info)
-        await self._explore_elements(current, current_info)
+        await self._explore_elements(current, current_info, state_elements)
 
     async def _explore_forms(
         self,
@@ -75,10 +69,10 @@ class CrawlSessionExploreMixin:
         self,
         current: AbstractState,
         current_info: StateReplayInfo,
+        state_elements: list[dict] | None = None,
     ) -> None:
-        elements = await self.browser.get_interactable_elements()
+        elements = state_elements or await self.browser.get_interactable_elements()
         processed = 0
-
         for element in elements:
             if processed >= self._settings.MAX_ELEMENTS_PER_STATE:
                 break
@@ -86,7 +80,7 @@ class CrawlSessionExploreMixin:
             if not self._within_limits():
                 break
 
-            if not self._should_process_element(element):
+            if not self._should_process_element(element, elements):
                 continue
 
             await self._wait_permission()
@@ -144,14 +138,21 @@ class CrawlSessionExploreMixin:
             if not await self._replay_after_action(current):
                 return
 
-    def _should_process_element(self, element: dict) -> bool:
+    def _should_process_element(
+        self,
+        element: dict,
+        state_elements: list[dict] | None = None,
+    ) -> bool:
         if element.get("disabled"):
             return False
 
         if element.get("in_form"):
             return False
 
-        return not self._is_blocked_anchor(element)
+        if self._is_blocked_anchor(element):
+            return False
+
+        return True
 
     def _plan_element_sequences(
         self,
@@ -335,8 +336,6 @@ class CrawlSessionExploreMixin:
             return False
 
     async def _prepare_state(self) -> None:
-        await self.browser.wait_for_settle()
-        await self._attempt_login_if_needed()
         await self.browser.wait_for_settle()
 
     async def _replay_after_action(self, current: AbstractState) -> bool:

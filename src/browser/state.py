@@ -41,9 +41,18 @@ class StateManager:
         ).strip()
 
         normalized = re.sub(
+            r"https?://",
+            "//",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+
+        normalized = re.sub(
             r"[\u0000-\u001f]+",
             " ",
             normalized,
         ).strip()
 
-        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+        return hashlib.sha256(
+            normalized.encode("utf-8")
+        ).hexdigest()
