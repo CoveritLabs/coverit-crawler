@@ -1,8 +1,8 @@
-from __future__ import annotations
-
 import json
-import re
 from typing import Any
+
+from src import config
+from src.crawler.semantic_engine.engine import SemanticEngine
 
 
 class InputValueResolver:
@@ -10,16 +10,22 @@ class InputValueResolver:
         self,
         config_path: str | None = None,
         input_defaults: dict[str, Any] | None = None,
+        confidence_threshold: float = 0.4,
+        semantic_engine: SemanticEngine | None = None,
     ):
         self._config = input_defaults if isinstance(input_defaults, dict) else self._load_config(config_path)
+        self._confidence_threshold = confidence_threshold
 
-        if "field_patterns" in self._config:
-            normalized_patterns = {}
-            for k, v in self._config["field_patterns"].items():
-                norm_k = re.sub(r"[\s_\-]", "", str(k).lower())
-                if norm_k:
-                    normalized_patterns[norm_k] = v
-            self._config["field_patterns"] = normalized_patterns
+        field_patterns = self._config.get("field_patterns", {})
+        if semantic_engine is not None:
+            semantic_engine.configure_input_defaults(field_patterns)
+            self._semantic_engine = semantic_engine
+        else:
+            self._semantic_engine = SemanticEngine(
+                input_defaults=field_patterns,
+                artifact_dir=config.SEMANTIC_ARTIFACT_DIR,
+                enabled=False,
+            )
 
     def _load_config(self, path: str | None) -> dict[str, Any]:
         if not path:
@@ -29,28 +35,16 @@ class InputValueResolver:
             return json.load(f)
 
     def resolve(self, element: dict) -> str:
-        hint_keys = [
-            element.get("id", ""),
-            element.get("name", ""),
-            element.get("placeholder", ""),
-            element.get("label", ""),
-        ]
+        resolved = self._semantic_engine.resolve_input_value(element)
 
-        patterns = self._config.get("field_patterns", {})
-        best_value: str | None = None
-        best_len = -1
-
-        for key in hint_keys:
-            if not key:
-                continue
-
-            normalized = re.sub(r"[\s_\-]", "", str(key).lower())
-
-            for pattern, value in patterns.items():
-                if pattern and pattern in normalized:
-                    if len(pattern) > best_len:
-                        best_value = str(value)
-                        best_len = len(pattern)
+        best_value = None
+        if (
+            resolved
+            and not resolved.abstained
+            and resolved.value is not None
+            and resolved.confidence >= self._confidence_threshold
+        ):
+            best_value = str(resolved.value)
 
         if best_value is not None:
             return self._apply_constraints(best_value, element)

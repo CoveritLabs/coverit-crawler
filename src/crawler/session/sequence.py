@@ -26,9 +26,9 @@ class CrawlSessionSequenceMixin:
         source: AbstractState,
         source_info: StateReplayInfo,
         actions: list[CrawlAction],
-    ) -> None:
+    ) -> AbstractState | None:
         if not self.executor or not self.replayer or not actions:
-            return
+            return None
 
         await self._wait_permission()
 
@@ -42,13 +42,13 @@ class CrawlSessionSequenceMixin:
         action_key = action_key_fingerprint(primary)
 
         if not self._action_repeat_limiter.can_run(scope=scope_url, action_key=action_key):
-            return
+            return None
 
         attempt_fp = action_attempt_fingerprint(source.state_hash, primary)
         tried = self._tried_actions_by_state.setdefault(source.state_hash, set())
 
         if attempt_fp in tried:
-            return
+            return None
 
         tried.add(attempt_fp)
 
@@ -84,29 +84,67 @@ class CrawlSessionSequenceMixin:
             if not is_same_domain(scope_url, new_url):
                 logger.warning(f"Left domain: {new_url}")
                 await self.replayer.replay_to(source.state_hash)
-                return
+                return None
 
             new_state = await self.browser.capture_state()
-            if new_state.state_hash == source.state_hash:
-                return
+            source_url = normalize_url(
+                getattr(source, "url", "") or source_info.checkpoint_url or ""
+            )
+            reached_url = normalize_url(new_url)
+            if new_state.state_hash == source.state_hash and reached_url == source_url:
+                return None
+
+            target_state = new_state
+            is_semantic_duplicate = False
+
+            if self._semantic_engine:
+                new_state_elements = await self.browser.get_interactable_elements()
+                comparison = self._semantic_engine.register_state(
+                    new_state.state_hash,
+                    new_state_elements,
+                )
+                diagnostics = self._semantic_engine.explain_comparison(comparison)
+                logger.debug("State comparison diagnostics: %s", diagnostics)
+                if not comparison.is_novel and comparison.matched_state_hash:
+                    logger.info(
+                        "State %s is equivalent to %s (confidence %.3f). Recording transition to known state.",
+                        new_state.state_hash,
+                        comparison.matched_state_hash,
+                        comparison.confidence,
+                    )
+                    target_state = AbstractState(
+                        state_hash=comparison.matched_state_hash,
+                        url=new_state.url,
+                        title=new_state.title,
+                        dom_snapshot=new_state.dom_snapshot,
+                        metadata=new_state.metadata,
+                    )
+                    is_semantic_duplicate = True
 
             info = self._build_replay_info(source_info, actions, reached_url=new_url)
 
             if not info.checkpoint_state_hash:
                 info.checkpoint_state_hash = new_state.state_hash
 
-            updated = self.replayer.register(new_state.state_hash, info)
+            updated = False
+            if not is_semantic_duplicate:
+                updated = self.replayer.register(new_state.state_hash, info)
 
-            await self.add_to_queue(new_state)
+                await self.add_to_queue(new_state)
 
-            if updated:
-                await self._persist_replay_artifacts(
-                    state_hash=new_state.state_hash,
-                    info=info,
-                    persist_storage_state=(info.checkpoint_state_hash == new_state.state_hash),
-                )
+                if updated:
+                    await self._persist_replay_artifacts(
+                        state_hash=new_state.state_hash,
+                        info=info,
+                        persist_storage_state=(info.checkpoint_state_hash == new_state.state_hash),
+                    )
 
-            await self.add_transition(self._build_transition(source, new_state, actions))
+            await self.add_transition(self._build_transition(source, target_state, actions))
+
+            if is_semantic_duplicate:
+                await self.replayer.replay_to(source.state_hash)
+
+            return target_state
 
         except Exception as e:
             logger.warning(f"Error on action sequence ({primary.action_type}): {e}")
@@ -114,6 +152,7 @@ class CrawlSessionSequenceMixin:
                 await self.replayer.replay_to(source.state_hash)
             except Exception:
                 pass
+            return None
 
     def _build_transition(
         self,

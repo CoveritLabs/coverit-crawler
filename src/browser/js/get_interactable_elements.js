@@ -11,6 +11,13 @@
         return String(value).replace(/\\/g, "\\\\").replace(/\"/g, "\\\"");
     };
 
+    const normalizeComparableUrl = (value) => {
+        return String(value || "")
+            .trim()
+            .replace(/^https?:\/\//i, "//")
+            .replace(/[?#]$/, "");
+    };
+
     const isVisible = (el) => {
         if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
         if (el.hidden) return false;
@@ -117,7 +124,7 @@
             if (!doc) continue;
             let frameUrl = "";
             try {
-                frameUrl = iframe.contentWindow && iframe.contentWindow.location ? String(iframe.contentWindow.location.href || "") : "";
+                frameUrl = iframe.contentWindow && iframe.contentWindow.location ? normalizeComparableUrl(iframe.contentWindow.location.href) : "";
             } catch {
                 frameUrl = "";
             }
@@ -126,7 +133,7 @@
                 frame: {
                     name: String(iframe.name || ""),
                     id: String(iframe.id || ""),
-                    src: String(iframe.getAttribute("src") || ""),
+                    src: normalizeComparableUrl(iframe.getAttribute("src")),
                     url: frameUrl,
                 },
             });
@@ -154,11 +161,13 @@
         const tag = el.tagName.toLowerCase();
         const type = (el.type || "").toLowerCase();
 
-        const href = tag === "a" ? (el.href || "") : "";
+        const href = tag === "a" ? normalizeComparableUrl(el.href) : "";
         const name = el.name || "";
         const placeholder = el.placeholder || "";
         const role = el.getAttribute && (el.getAttribute("role") || "");
         const ariaLabel = el.getAttribute && (el.getAttribute("aria-label") || "");
+        const ariaInvalid = el.getAttribute && (el.getAttribute("aria-invalid") || "");
+        const ariaExpanded = el.getAttribute && (el.getAttribute("aria-expanded") || "");
         const disabled = !!el.disabled;
         const readonly = !!el.readOnly;
         const required = !!el.required;
@@ -166,7 +175,12 @@
         const contenteditable = !!(el.isContentEditable || el.getAttribute("contenteditable"));
 
         const text = (tag === "input" ? "" : (el.innerText || "")).trim();
-        const value = (tag === "input" ? (el.value || "") : "");
+        const value = (
+            tag === "input"
+            || tag === "select"
+            || tag === "textarea"
+            || contenteditable
+        ) ? (el.value || el.innerText || "") : "";
         const options = tag === "select"
             ? Array.from(el.options).slice(0, 50).map(o => ({ value: o.value, text: (o.text || "").trim() }))
             : [];
@@ -192,6 +206,8 @@
             placeholder,
             role,
             aria_label: ariaLabel,
+            aria_invalid: ariaInvalid,
+            aria_expanded: ariaExpanded,
             label: labelFor(el.ownerDocument || document, el),
             in_form: inForm,
             disabled,

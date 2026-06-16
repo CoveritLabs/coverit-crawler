@@ -5,6 +5,7 @@ from typing import Any
 from src.browser import BrowserEngine
 from src.crawler.enums import ActionType, HtmlTag, InputType
 from src.crawler.input_resolver import InputValueResolver
+from src.crawler.semantic_engine import SemanticEngine
 from src.models import AbstractTransition, CrawlAction
 from src.utils import element_display_hint
 
@@ -15,9 +16,14 @@ class EventExecutor:
         browser: BrowserEngine,
         config_path: str | None = None,
         input_defaults: dict[str, Any] | None = None,
+        semantic_engine: SemanticEngine | None = None,
     ):
         self._browser = browser
-        self._resolver = InputValueResolver(config_path=config_path, input_defaults=input_defaults)
+        self._resolver = InputValueResolver(
+            config_path=config_path,
+            input_defaults=input_defaults,
+            semantic_engine=semantic_engine,
+        )
         self._transition_log: list[AbstractTransition] = []
 
     def resolve_value(self, element: dict) -> str:

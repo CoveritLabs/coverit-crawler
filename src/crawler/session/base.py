@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections import deque
 from uuid import uuid4
@@ -11,8 +12,9 @@ from src.crawler.action_limits import ActionRepeatLimiter
 from src.crawler.executor import EventExecutor
 from src.crawler.replay import StateReplayer, StateReplayInfo
 from src.crawler.risk import RiskClassifier
+from src.crawler.semantic_engine import SemanticEngine
 from src.crawler.session.types import DeferredWorkItem
-from src.models import AbstractState, AbstractTransition
+from src.models import AbstractState, AbstractTransition, CrawlAction
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +62,7 @@ class CrawlSessionBase:
         )
         self.executor: EventExecutor | None = None
         self.replayer: StateReplayer | None = None
+        self._semantic_engine: SemanticEngine | None = None
         self._max_states: int = int(max_states if max_states is not None else getattr(settings, "MAX_STATES", 1000))
         self._max_transitions: int = int(max_transitions if max_transitions is not None else getattr(settings, "MAX_TRANSITIONS", 5000))
         self._state_count: int = 0
@@ -79,25 +82,51 @@ class CrawlSessionBase:
 
     async def initialize(self) -> None:
         await self.browser.start()
+        input_config = self._resolved_input_config()
+        field_patterns = input_config.get("field_patterns", {})
+
+        self._semantic_engine = SemanticEngine(
+            input_defaults=field_patterns,
+            artifact_dir=self._settings.SEMANTIC_ARTIFACT_DIR,
+            enabled=self._settings.USE_SEMANTIC_DIVERSITY,
+            similarity_threshold=self._settings.SEMANTIC_DIVERSITY_THRESHOLD,
+            uncertainty_margin=self._settings.SEMANTIC_UNCERTAINTY_MARGIN,
+            max_bank_size=self._settings.SEMANTIC_MAX_BANK_SIZE,
+        )
         self.executor = EventExecutor(
             self.browser,
             config_path=self.config_path,
-            input_defaults=self._input_defaults,
+            input_defaults=input_config,
+            semantic_engine=self._semantic_engine,
         )
         self.replayer = StateReplayer(self.browser, self.executor, self._settings)
+
         logger.info("Crawl session initialized")
+
+    def _resolved_input_config(self) -> dict:
+        if isinstance(self._input_defaults, dict):
+            if "field_patterns" in self._input_defaults or "type_fallbacks" in self._input_defaults:
+                return self._input_defaults
+            return {"field_patterns": self._input_defaults, "type_fallbacks": {}}
+
+        if self.config_path:
+            with open(self.config_path, "r", encoding="utf-8") as handle:
+                return json.load(handle)
+
+        return {"field_patterns": {}, "type_fallbacks": {}}
 
     async def cleanup(self) -> None:
         await self.browser.stop()
         logger.info("Crawl session completed")
 
-    async def add_to_queue(self, state: AbstractState) -> None:
+    async def add_to_queue(self, state: AbstractState, *, enqueue: bool = True) -> None:
         if state.state_hash in self.discovered_states:
             return
         await self._wait_permission()
         self._state_count += 1
         self.discovered_states.add(state.state_hash)
-        self.discovery_queue.append(state)
+        if enqueue:
+            self.discovery_queue.append(state)
         await self.graph_builder.add_state(self.session_id, state)
 
     def get_next_state(self) -> AbstractState | None:
@@ -157,13 +186,17 @@ class CrawlSessionBase:
         await self.browser.navigate(self.base_url)
         await self.browser.wait_for_settle()
 
-        await self._attempt_login_if_needed()
-        await self.browser.wait_for_settle()
-
         initial_state = await self.browser.capture_state()
         if not self.replayer:
             return
-        await self.add_to_queue(initial_state)
+
+        login_actions = await self._plan_login_actions()
+
+        if self._semantic_engine:
+            initial_elements = await self.browser.get_interactable_elements()
+            self._semantic_engine.register_state(initial_state.state_hash, initial_elements)
+
+        await self.add_to_queue(initial_state, enqueue=not bool(login_actions))
 
         info = StateReplayInfo(
             checkpoint_url=initial_state.url,
@@ -179,27 +212,30 @@ class CrawlSessionBase:
             )
         logger.info(f"Initial state: {initial_state.state_hash} at {initial_state.url}")
 
-    async def _attempt_login_if_needed(self) -> None:
+        if login_actions:
+            reached = await self._execute_action_sequence(initial_state, info, login_actions)
+            if not reached:
+                self.discovery_queue.append(initial_state)
+
+    async def _plan_login_actions(self) -> list[CrawlAction] | None:
         if self._login_attempts >= 2:
-            return
+            return None
         if not self.executor:
-            return
+            return None
 
         await self._wait_permission()
 
         forms = await self.browser.get_forms()
         login_form = self._select_login_form(forms)
         if not login_form:
-            return
+            return None
 
-        self._login_attempts += 1
         actions = self.executor.plan_form_submission(login_form)
         if not actions:
-            return
+            return None
 
-        for action in actions:
-            await self._wait_permission()
-            await self.executor.execute_action(action)
+        self._login_attempts += 1
+        return actions
 
     def _select_login_form(self, forms: list[dict]) -> dict | None:
         for form in forms:
