@@ -198,6 +198,14 @@ class BrowserEngine:
     async def get_page_content(self) -> str:
         return await self._require_page().content()
 
+    async def get_annotated_page_content(self) -> str:
+        try:
+            return await self._evaluate_js(
+                self._js.load("get_annotated_page_content.js")
+            )
+        except Exception:
+            return await self.get_page_content()
+
     async def get_state_hash(self) -> str:
         semantic = await self._evaluate_js(self._js.load("get_state_hash.js"))
         return self._state.hash_content(str(semantic))

@@ -12,6 +12,7 @@ class AbstractState:
     state_hash: str = ""
     url: str = ""
     title: str = ""
+    html: str = ""
     dom_snapshot: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 

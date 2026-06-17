@@ -12,16 +12,19 @@ class StateManager:
         self._browser = browser
 
     async def capture(self) -> AbstractState:
+        await self._browser.wait_for_settle()
+
         state_hash = await self._browser.get_state_hash()
         url = await self._browser.get_current_url()
         title = await self._browser.get_page_title()
-        content = await self._browser.get_page_content()
+        content = await self._browser.get_annotated_page_content()
         interactable = await self._browser.get_interactable_elements()
 
         return AbstractState(
             state_hash=state_hash,
             url=url,
             title=title,
+            html=content,
             dom_snapshot={
                 "content_length": len(content),
                 "element_count": len(interactable),

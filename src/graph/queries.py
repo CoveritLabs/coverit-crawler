@@ -1,7 +1,16 @@
 ADD_STATE = """
 MERGE (s:State {session_id: $session_id, state_hash: $state_hash})
-ON CREATE SET s.url = $url, s.title = $title, s.first_seen = timestamp(), s.last_seen = timestamp()
-ON MATCH SET s.url = $url, s.title = $title, s.last_seen = timestamp()
+ON CREATE SET
+    s.url = $url,
+    s.title = $title,
+    s.html = $html,
+    s.first_seen = timestamp(),
+    s.last_seen = timestamp()
+ON MATCH SET
+    s.url = $url,
+    s.title = $title,
+    s.html = $html,
+    s.last_seen = timestamp()
 """
 
 SET_STATE_PROPS = """
