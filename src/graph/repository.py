@@ -43,6 +43,7 @@ class GraphRepository:
                 state_hash=state.state_hash,
                 url=state.url,
                 title=state.title,
+                html=state.html,
             )
 
     async def set_state_properties(self, session_id: str, state_hash: str, props: dict) -> None:

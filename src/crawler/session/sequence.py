@@ -116,6 +116,7 @@ class CrawlSessionSequenceMixin:
                         state_hash=comparison.matched_state_hash,
                         url=new_state.url,
                         title=new_state.title,
+                        html=new_state.html,
                         dom_snapshot=new_state.dom_snapshot,
                         metadata=new_state.metadata,
                     )
