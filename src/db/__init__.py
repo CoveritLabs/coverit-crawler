@@ -13,6 +13,7 @@ __all__ = [
     "create_engine",
     "create_sessionmaker",
     "fetch_job_inputs",
+    "fetch_graph_id",
     "get_session_status",
     "mark_completed_if_running",
     "mark_failed_if_running",
@@ -29,12 +30,13 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "crawl_status_enum": ("src.db.enums", "crawl_status_enum"),
     "create_engine": ("src.db.database", "create_engine"),
     "create_sessionmaker": ("src.db.database", "create_sessionmaker"),
-    "fetch_job_inputs": ("src.db.crawl_sessions", "fetch_job_inputs"),
-    "get_session_status": ("src.db.crawl_sessions", "get_session_status"),
-    "mark_completed_if_running": ("src.db.crawl_sessions", "mark_completed_if_running"),
-    "mark_failed_if_running": ("src.db.crawl_sessions", "mark_failed_if_running"),
-    "mark_finished_at_if_aborted": ("src.db.crawl_sessions", "mark_finished_at_if_aborted"),
-    "mark_queued_running": ("src.db.crawl_sessions", "mark_queued_running"),
+    "fetch_job_inputs": ("src.db.repositories.crawl_sessions", "fetch_job_inputs"),
+    "fetch_graph_id": ("src.db.repositories.crawl_sessions", "fetch_graph_id"),
+    "get_session_status": ("src.db.repositories.crawl_sessions", "get_session_status"),
+    "mark_completed_if_running": ("src.db.repositories.crawl_sessions", "mark_completed_if_running"),
+    "mark_failed_if_running": ("src.db.repositories.crawl_sessions", "mark_failed_if_running"),
+    "mark_finished_at_if_aborted": ("src.db.repositories.crawl_sessions", "mark_finished_at_if_aborted"),
+    "mark_queued_running": ("src.db.repositories.crawl_sessions", "mark_queued_running"),
 }
 
 
@@ -58,6 +60,7 @@ if TYPE_CHECKING:
     from src.db.enums import crawl_status_enum
     from src.db.enums.crawl_status import CrawlStatus
     from src.db.repositories.crawl_sessions import (
+        fetch_graph_id,
         fetch_job_inputs,
         get_session_status,
         mark_completed_if_running,

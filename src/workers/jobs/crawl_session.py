@@ -13,7 +13,7 @@ from src.db.repositories.crawl_sessions import (
 )
 from src.db.services.crawl_sessions import ensure_started_or_skip_aborted
 from src.models import CrawlJob
-from src.queue import clear_cancel, crawl_stream_config, is_cancelled
+from src.workers.flow_worker import generate_flows_for_session
 
 logger = logging.getLogger(__name__)
 
@@ -25,15 +25,25 @@ def _pick(source: dict[str, Any], *keys: str) -> Any:
     return None
 
 
-def _build_payload_from_db(config_json: dict[str, Any], base_url: str, session_id: str) -> dict[str, Any]:
+def _timeout_ms(config_json: dict[str, Any], crawler_settings: dict[str, Any]) -> Any:
+    explicit = _pick(crawler_settings, "timeout_ms", "timeoutMs")
+    if explicit is not None:
+        return explicit
+    seconds = _pick(config_json, "timeout_seconds", "timeoutSeconds")
+    if seconds is None:
+        return None
+    return int(seconds) * 1000
+
+
+def _build_payload_from_db(config_json: dict[str, Any], base_url: str, session_id: str, graph_id: str) -> dict[str, Any]:
     crawler_settings = config_json.get("crawlerSettings")
     if not isinstance(crawler_settings, dict):
         crawler_settings = {}
 
     settings = {
         "headless": _pick(crawler_settings, "headless"),
-        "timeout_ms": _pick(crawler_settings, "timeout_ms", "timeoutMs"),
-        "max_states": _pick(crawler_settings, "max_states", "maxStates"),
+        "timeout_ms": _timeout_ms(config_json, crawler_settings),
+        "max_states": _pick(crawler_settings, "max_states", "maxStates") or _pick(config_json, "max_states", "maxStates"),
         "max_transitions": _pick(crawler_settings, "max_transitions", "maxTransitions"),
         "max_elements_per_state": _pick(crawler_settings, "max_elements_per_state", "maxElementsPerState"),
         "max_select_options_per_element": _pick(
@@ -51,6 +61,15 @@ def _build_payload_from_db(config_json: dict[str, Any], base_url: str, session_i
         "page_load_state": _pick(crawler_settings, "page_load_state", "pageLoadState"),
         "click_non_http_links": _pick(crawler_settings, "click_non_http_links", "clickNonHttpLinks"),
         "defer_destructive_actions": _pick(crawler_settings, "defer_destructive_actions", "deferDestructiveActions"),
+        "use_semantic_diversity": (
+            _pick(crawler_settings, "use_semantic_diversity", "useSemanticDiversity")
+            if _pick(crawler_settings, "use_semantic_diversity", "useSemanticDiversity") is not None
+            else _pick(config_json, "enable_semantic_decisions", "enableSemanticDecisions")
+        ),
+        "semantic_diversity_threshold": _pick(crawler_settings, "semantic_diversity_threshold", "semanticDiversityThreshold"),
+        "semantic_uncertainty_margin": _pick(crawler_settings, "semantic_uncertainty_margin", "semanticUncertaintyMargin"),
+        "semantic_max_bank_size": _pick(crawler_settings, "semantic_max_bank_size", "semanticMaxBankSize"),
+        "semantic_artifact_dir": _pick(crawler_settings, "semantic_artifact_dir", "semanticArtifactDir"),
         "destructive_keywords": (
             ",".join(_pick(crawler_settings, "destructive_keywords", "destructiveKeywords"))
             if isinstance(_pick(crawler_settings, "destructive_keywords", "destructiveKeywords"), list)
@@ -61,37 +80,25 @@ def _build_payload_from_db(config_json: dict[str, Any], base_url: str, session_i
     return {
         "base_url": base_url,
         "session_id": session_id,
+        "graph_id": graph_id,
         "settings": settings,
         "input_defaults": config_json.get("inputDefaults"),
     }
 
 
 async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
-    redis = ctx.get("redis")
     db = ctx["db"]
     worker = ctx["crawler_worker"]
-
-    stream_cfg = crawl_stream_config()
-
-    if redis is not None and await is_cancelled(redis, stream_cfg, session_id):
-        await clear_cancel(redis, stream_cfg, session_id)
-        async with db() as s:
-            await mark_finished_at_if_aborted(s, session_id)
-        return {"status": "cancelled", "session_id": session_id}
 
     async with db() as s:
         started = await ensure_started_or_skip_aborted(s, session_id)
         if not started:
             return {"status": "aborted", "session_id": session_id}
 
-        config_json, base_url = await fetch_job_inputs(s, session_id)
-
-    payload = _build_payload_from_db(config_json, base_url, session_id)
-    job = CrawlJob.from_dict(payload, worker._settings)
-
     abort_event = asyncio.Event()
     run_permission = asyncio.Event()
     run_permission.set()
+    poll_task: asyncio.Task | None = None
 
     async def abort_poller() -> None:
         while True:
@@ -108,10 +115,16 @@ async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
             else:
                 run_permission.set()
 
-    crawl_task = asyncio.create_task(worker.process(job, run_permission=run_permission))
-    poll_task = asyncio.create_task(abort_poller())
-
     try:
+        async with db() as s:
+            config_json, base_url, graph_id = await fetch_job_inputs(s, session_id)
+
+        payload = _build_payload_from_db(config_json, base_url, session_id, graph_id)
+        job = CrawlJob.from_dict(payload, worker._settings)
+
+        crawl_task = asyncio.create_task(worker.process(job, run_permission=run_permission))
+        poll_task = asyncio.create_task(abort_poller())
+
         while True:
             done, _ = await asyncio.wait(
                 {crawl_task, poll_task},
@@ -132,14 +145,18 @@ async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
                 await mark_finished_at_if_aborted(s, session_id)
             return {"status": "aborted", "session_id": session_id}
 
+        async with db() as s:
+            status = await get_session_status(s, session_id)
+
         state_count, transition_count = await crawl_task
+        if status in {"RUNNING", "PAUSED"}:
+            await generate_flows_for_session(ctx, session_id, graph_id)
+
         async with db() as s:
             updated = await mark_completed_if_running(s, session_id, state_count, transition_count)
             if not updated:
                 await mark_finished_at_if_aborted(s, session_id)
-
-        if updated:
-            await ctx["redis"].enqueue_job("generate_flows_for_session", session_id)
+                return {"status": "aborted", "session_id": session_id}
 
         return {
             "status": "completed",
@@ -163,10 +180,11 @@ async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
         raise
 
     finally:
-        poll_task.cancel()
-        try:
-            await poll_task
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            pass
+        if poll_task is not None:
+            poll_task.cancel()
+            try:
+                await poll_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass

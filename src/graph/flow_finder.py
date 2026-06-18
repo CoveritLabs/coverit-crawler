@@ -3,14 +3,13 @@ from __future__ import annotations
 import logging
 from collections import deque
 from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class FlowPath:
-    """Lightweight flow containing only transition IDs and its origin checkpoint."""
-
     transition_refs: list[str]
     checkpoint_hash: str
 
@@ -22,10 +21,6 @@ async def find_all_flows(
     max_paths_per_state: int = 3,
     max_depth: int = 20,
 ) -> dict[str, list[FlowPath]]:
-    """
-    Finds up to max_paths_per_state unique flows to each state,
-    starting from checkpoint states and the root.
-    """
     raw = await graph_repo.get_lightweight_flow_graph(session_id)
 
     states_info: dict[str, dict] = {s["state_hash"]: s for s in raw.get("states", [])}
@@ -59,7 +54,6 @@ async def find_all_flows(
     result: dict[str, list[FlowPath]] = {h: [] for h in states_info}
     recorded_sources_per_state: dict[str, set[str]] = {h: set() for h in states_info}
 
-    # Queue stores: (current_state_hash, origin_checkpoint_hash, path_of_trans_ids, visited_states_set)
     queue = deque()
     for source in starting_sources:
         if source in states_info:
@@ -67,7 +61,6 @@ async def find_all_flows(
 
     while queue:
         current, origin_cp, path, visited = queue.popleft()
-        # if this node is already a checkpoint, we should stop as we already flooded and started from it
         if current in checkpoint_states and current != origin_cp:
             continue
         if len(path) >= max_depth:
@@ -102,11 +95,6 @@ async def find_all_flows(
 
 
 def _find_root(states: dict[str, dict]) -> str | None:
-    """
-    The root is the state with the earliest first_seen timestamp.
-    Falls back to the first state with checkpoint_kind == 'initial'.
-    """
-
     with_ts = [(h, s) for h, s in states.items() if s.get("first_seen") is not None]
     if with_ts:
         return min(with_ts, key=lambda x: x[1]["first_seen"])[0]
@@ -114,18 +102,42 @@ def _find_root(states: dict[str, dict]) -> str | None:
     return next(iter(states), None)
 
 
-def _serialize_all_flows(all_flows: dict[str, list[FlowPath]]) -> dict[str, list[dict]]:
-    """
-    Outputs highly compressed plain dicts for JSON transport.
-    Shape: { state_hash: [ { checkpoint_hash, transition_refs: [str] } ] }
-    """
-    result: dict[str, list[dict]] = {}
+async def serialize_all_flows(graph_repo, session_id: str, all_flows: dict[str, list[FlowPath]]) -> dict[str, list[dict[str, Any]]]:
+    result: dict[str, list[dict[str, Any]]] = {}
     for state_hash, flows in all_flows.items():
-        result[state_hash] = [
+        result[state_hash] = []
+        for flow in flows:
+            checkpoint_url, _, transitions = await graph_repo.get_data_from_flow_query(
+                session_id,
+                flow.checkpoint_hash,
+                flow.transition_refs,
+            )
+            path = [{"state_hash": flow.checkpoint_hash, "transition": None}]
+            for transition in transitions:
+                target_hash = transition.pop("target_state_hash", None)
+                transition.pop("source_state_hash", None)
+                transition.pop("order", None)
+                if target_hash:
+                    path.append({"state_hash": target_hash, "transition": transition})
+            result[state_hash].append(
+                {
+                    "checkpoint": flow.checkpoint_hash,
+                    "checkpoint_url": checkpoint_url or "",
+                    "is_clipped": len(transitions) != len(flow.transition_refs),
+                    "path": path,
+                }
+            )
+    return result
+
+
+def _serialize_all_flows(all_flows: dict[str, list[FlowPath]]) -> dict[str, list[dict[str, Any]]]:
+    return {
+        state_hash: [
             {
                 "checkpoint": flow.checkpoint_hash,
                 "transition_refs": flow.transition_refs,
             }
             for flow in flows
         ]
-    return result
+        for state_hash, flows in all_flows.items()
+    }

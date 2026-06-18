@@ -30,6 +30,7 @@ class CrawlSession(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    base_url_snapshot: Mapped[str | None] = mapped_column(String)
     error: Mapped[str | None] = mapped_column(String)
 
     app_version: Mapped[TargetApplicationVersion | None] = relationship(

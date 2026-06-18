@@ -8,6 +8,8 @@ pnpm-debug.log*
 
 # Dependencies
 node_modules
+.venv/
+venv/
 .pnp
 .pnp.js
 
@@ -17,6 +19,9 @@ dist
 
 # Test / coverage
 coverage
+.pytest_cache/
+.ruff_cache/
+.uv-cache/
 
 # Editor directories and files
 .vscode/*
@@ -38,6 +43,7 @@ coverage
 !.env.example
 
 **/__pycache__/
+%SystemDrive%/
 /src/generated/prisma
 data/semantic_pipeline/
 data/semantic_source_archive/

@@ -94,10 +94,8 @@ class GraphRepository:
         async with self._driver.session() as session:
             await session.run(CLEAR_SESSION, session_id=session_id)
 
-
     async def get_lightweight_flow_graph(self, session_id: str) -> dict:
         async with self._driver.session() as session:
-            result = await session.run(GET_LIGHTWEIGHT_FLOW_GRAPH, session_id=session_id)
             result = await session.run(GET_LIGHTWEIGHT_FLOW_GRAPH, session_id=session_id)
             record = await result.single()
             if not record:
@@ -106,12 +104,14 @@ class GraphRepository:
 
     async def get_data_from_flow_query(
         self,
+        session_id: str,
         checkpoint_hash: str,
         transition_refs: list[str],
     ) -> tuple[str | None, Any, list[dict[str, Any]]]:
         async with self._driver.session() as session:
             result = await session.run(
                 GET_DATA_FROM_FLOW_QUERY,
+                session_id=session_id,
                 checkpoint_hash=checkpoint_hash,
                 transition_refs=transition_refs,
             )
@@ -120,5 +120,5 @@ class GraphRepository:
                 return None, None, []
             checkpoint_url = record.get("checkpoint_url")
             checkpoint_storage_state_json = record.get("checkpoint_storage_state_json")
-            transitions = record.get("transitions", [])
+            transitions = sorted(record.get("transitions", []), key=lambda item: item.get("order", 0))
             return checkpoint_url, checkpoint_storage_state_json, transitions

@@ -56,6 +56,10 @@ class Config:
 
     DATABASE_URL: str | None
     REDIS_URL: str | None
+    ARQ_QUEUE_NAME: str
+    ARQ_JOB_EXPIRES_MS: int
+    CRAWLER_MAX_JOBS: int
+    CRAWLER_JOB_TIMEOUT_SECONDS: int
 
     @classmethod
     def from_env(cls) -> Config:
@@ -93,6 +97,10 @@ class Config:
             USE_SEMANTIC_DIVERSITY=_env_bool("USE_SEMANTIC_DIVERSITY", "true"),
             DATABASE_URL=os.getenv("DATABASE_URL") or None,
             REDIS_URL=os.getenv("REDIS_URL") or None,
+            ARQ_QUEUE_NAME=os.getenv("CRAWL_ARQ_QUEUE_NAME", "arq:queue"),
+            ARQ_JOB_EXPIRES_MS=_env_int("CRAWL_ARQ_EXPIRES_MS", 86400000),
+            CRAWLER_MAX_JOBS=_env_int("CRAWLER_MAX_JOBS", 10),
+            CRAWLER_JOB_TIMEOUT_SECONDS=_env_int("CRAWLER_JOB_TIMEOUT_SECONDS", 1800),
         )
 
 
