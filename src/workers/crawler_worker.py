@@ -35,6 +35,11 @@ def _job_settings(base: Config, job: CrawlJob) -> Config:
         CLICK_NON_HTTP_LINKS=job.click_non_http_links,
         DEFER_DESTRUCTIVE_ACTIONS=job.defer_destructive_actions,
         DESTRUCTIVE_KEYWORDS=job.destructive_keywords,
+        USE_SEMANTIC_DIVERSITY=job.use_semantic_diversity,
+        SEMANTIC_DIVERSITY_THRESHOLD=job.semantic_diversity_threshold,
+        SEMANTIC_UNCERTAINTY_MARGIN=job.semantic_uncertainty_margin,
+        SEMANTIC_MAX_BANK_SIZE=job.semantic_max_bank_size,
+        SEMANTIC_ARTIFACT_DIR=job.semantic_artifact_dir,
     )
 
 
@@ -62,7 +67,7 @@ class CrawlerWorker:
             base_url=job.base_url,
             graph_builder=self._graph_builder,
             config_path=job.input_defaults_path,
-            session_id=job.session_id,
+            session_id=job.graph_id,
             headless=job.headless,
             max_states=job.max_states,
             max_transitions=job.max_transitions,

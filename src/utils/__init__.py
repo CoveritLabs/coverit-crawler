@@ -7,6 +7,7 @@ __all__ = [
     "attach_selectors_to_forms",
     "build_selector",
     "coerce_bool",
+    "coerce_float",
     "coerce_int",
     "coerce_str",
     "element_display_hint",
@@ -32,6 +33,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "attach_selectors_to_forms": ("src.utils.dom", "attach_selectors_to_forms"),
     "build_selector": ("src.utils.dom", "build_selector"),
     "coerce_bool": ("src.utils.coercion", "coerce_bool"),
+    "coerce_float": ("src.utils.coercion", "coerce_float"),
     "coerce_int": ("src.utils.coercion", "coerce_int"),
     "coerce_str": ("src.utils.coercion", "coerce_str"),
     "element_display_hint": ("src.utils.dom", "element_display_hint"),
@@ -69,7 +71,7 @@ def __dir__() -> list[str]:
 
 
 if TYPE_CHECKING:
-    from src.utils.coercion import coerce_bool, coerce_int, coerce_str
+    from src.utils.coercion import coerce_bool, coerce_float, coerce_int, coerce_str
     from src.utils.common import read_file, to_ms
     from src.utils.dom import (
         attach_selectors_to_forms,

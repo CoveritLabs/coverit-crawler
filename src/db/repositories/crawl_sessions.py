@@ -14,7 +14,10 @@ async def get_session_status(session: AsyncSession, session_id: str) -> str | No
     stmt = select(CrawlSession.status).where(CrawlSession.crawl_session_id == session_id)
     result = await session.execute(stmt)
     value = result.scalar_one_or_none()
-    return str(value) if value is not None else None
+    if value is None:
+        return None
+    enum_value = getattr(value, "value", None)
+    return str(enum_value if enum_value is not None else value)
 
 
 async def mark_queued_running(session: AsyncSession, session_id: str) -> bool:
@@ -92,7 +95,7 @@ async def mark_finished_at_if_aborted(session: AsyncSession, session_id: str) ->
     await session.commit()
 
 
-async def fetch_job_inputs(session: AsyncSession, session_id: str) -> tuple[dict[str, Any], str]:
+async def fetch_job_inputs(session: AsyncSession, session_id: str) -> tuple[dict[str, Any], str, str]:
     stmt = (
         select(CrawlSession)
         .options(joinedload(CrawlSession.app_version).joinedload(TargetApplicationVersion.target_application))
@@ -111,15 +114,31 @@ async def fetch_job_inputs(session: AsyncSession, session_id: str) -> tuple[dict
         except Exception:
             config_json = {}
 
-    base_url = str(
-        getattr(
-            getattr(getattr(crawl_session, "app_version", None), "target_application", None),
-            "base_url",
-            "",
-        )
-        or ""
-    ).strip()
+    base_url = str(crawl_session.base_url_snapshot or "").strip()
+    if not base_url:
+        base_url = str(
+            getattr(
+                getattr(getattr(crawl_session, "app_version", None), "target_application", None),
+                "base_url",
+                "",
+            )
+            or ""
+        ).strip()
     if not base_url:
         raise RuntimeError(f"target application base_url missing for session: {session_id}")
 
-    return config_json, base_url
+    app_version_id = str(crawl_session.app_version_id or "").strip()
+    if not app_version_id:
+        raise RuntimeError(f"app_version_id missing for session: {session_id}")
+
+    return config_json, base_url, app_version_id
+
+
+async def fetch_graph_id(session: AsyncSession, session_id: str) -> str:
+    stmt = select(CrawlSession.app_version_id).where(CrawlSession.crawl_session_id == session_id)
+    result = await session.execute(stmt)
+    value = result.scalar_one_or_none()
+    graph_id = str(value or "").strip()
+    if not graph_id:
+        raise RuntimeError(f"app_version_id missing for session: {session_id}")
+    return graph_id

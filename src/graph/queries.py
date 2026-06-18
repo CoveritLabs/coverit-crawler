@@ -1,5 +1,5 @@
 ADD_STATE = """
-MERGE (s:State {session_id: $session_id, state_hash: $state_hash})
+MERGE (s:State {graph_id: $session_id, state_hash: $state_hash})
 ON CREATE SET
     s.url = $url,
     s.title = $title,
@@ -14,27 +14,27 @@ ON MATCH SET
 """
 
 SET_STATE_PROPS = """
-MATCH (s:State {session_id: $session_id, state_hash: $state_hash})
+MATCH (s:State {graph_id: $session_id, state_hash: $state_hash})
 SET s += $props
 """
 
 ADD_TRANSITION = """
-MATCH (source:State {session_id: $session_id, state_hash: $source_hash})
-MATCH (target:State {session_id: $session_id, state_hash: $target_hash})
-MERGE (source)-[t:TRANSITION {session_id: $session_id, transition_id: $transition_id}]->(target)
+MATCH (source:State {graph_id: $session_id, state_hash: $source_hash})
+MATCH (target:State {graph_id: $session_id, state_hash: $target_hash})
+MERGE (source)-[t:TRANSITION {graph_id: $session_id, transition_id: $transition_id}]->(target)
 ON CREATE SET t += $props, t.first_seen = timestamp(), t.last_seen = timestamp()
 ON MATCH SET t += $props, t.last_seen = timestamp()
 """
 
 GET_GRAPH = """
-MATCH (s:State {session_id: $session_id})
-OPTIONAL MATCH (s)-[t:TRANSITION]->(target:State)
+MATCH (s:State {graph_id: $session_id})
+OPTIONAL MATCH (s)-[t:TRANSITION {graph_id: $session_id}]->(target:State)
 RETURN collect(DISTINCT s) AS states,
 collect(DISTINCT {transition_id: t.transition_id, source_hash: s.state_hash, target_hash: target.state_hash, action_type: t.action_type, action_value: t.action_value, action_fingerprint: t.action_fingerprint}) AS transitions
 """
 
 GET_ACTIONS = """
-MATCH (s:State {session_id: $session_id, state_hash: $state_hash})-[t:TRANSITION]->(target:State)
+MATCH (s:State {graph_id: $session_id, state_hash: $state_hash})-[t:TRANSITION {graph_id: $session_id}]->(target:State)
 RETURN t.transition_id AS transition_id,
 target.state_hash AS target_state_hash,
 t.action_type AS action_type,
@@ -45,18 +45,19 @@ t.action_fingerprint AS action_fingerprint
 """
 
 CLEAR_SESSION = """
-MATCH (s:State {session_id: $session_id})
+MATCH (s:State {graph_id: $session_id})
 DETACH DELETE s
 """
 
 GET_LIGHTWEIGHT_FLOW_GRAPH = """
-MATCH (s:State {session_id: $session_id})
-OPTIONAL MATCH (s)-[t:TRANSITION]->(target:State)
+MATCH (s:State {graph_id: $session_id})
+OPTIONAL MATCH (s)-[t:TRANSITION {graph_id: $session_id}]->(target:State)
 RETURN
     collect(DISTINCT {
         state_hash: s.state_hash,
         is_checkpoint: s.is_checkpoint,
-        checkpoint_kind: s.checkpoint_kind
+        checkpoint_kind: s.checkpoint_kind,
+        first_seen: s.first_seen
     }) AS states,
     collect(DISTINCT {
         source_hash: s.state_hash,
@@ -66,18 +67,25 @@ RETURN
 """
 
 GET_DATA_FROM_FLOW_QUERY = """
-MATCH (s:State {state_hash: $checkpoint_hash})
+MATCH (s:State {graph_id: $session_id, state_hash: $checkpoint_hash})
 WITH s.checkpoint_url AS checkpoint_url,
-     s.checkpoint_storage_state_json AS checkpoint_storage_state_json
-UNWIND $transition_refs AS ref
-MATCH ()-[t:TRANSITION {transition_id: ref}]->()
+     s.checkpoint_storage_state_json AS checkpoint_storage_state_json,
+     $transition_refs AS refs
+UNWIND range(0, size(refs) - 1) AS idx
+WITH checkpoint_url, checkpoint_storage_state_json, idx, refs[idx] AS ref
+MATCH (source:State)-[t:TRANSITION {graph_id: $session_id, transition_id: ref}]->(target:State)
 RETURN checkpoint_url,
        checkpoint_storage_state_json,
        collect({
+         order: idx,
          transition_id: t.transition_id,
+         source_state_hash: source.state_hash,
+         target_state_hash: target.state_hash,
          action_type: t.action_type,
+         action_description: t.action_description,
+         action_fingerprint: t.action_fingerprint,
          selector: t.locator_value,
          value: t.action_value,
-         description: t.action_description
+         checkpoint_url: checkpoint_url
        }) AS transitions
 """

@@ -6,7 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 from src.config import Config
-from src.utils.coercion import coerce_bool, coerce_int, coerce_str
+from src.utils.coercion import coerce_bool, coerce_float, coerce_int, coerce_str
 
 
 def _repo_root() -> Path:
@@ -22,6 +22,7 @@ def _default_input_config_path() -> str | None:
 class CrawlJob:
     base_url: str
     session_id: str
+    graph_id: str
     headless: bool
     timeout_ms: int
     max_states: int
@@ -39,6 +40,11 @@ class CrawlJob:
     click_non_http_links: bool
     defer_destructive_actions: bool
     destructive_keywords: str
+    use_semantic_diversity: bool
+    semantic_diversity_threshold: float
+    semantic_uncertainty_margin: float
+    semantic_max_bank_size: int
+    semantic_artifact_dir: str
     input_defaults: dict[str, Any] | None = None
     input_defaults_path: str | None = None
 
@@ -53,6 +59,7 @@ class CrawlJob:
             raise ValueError("base_url is required")
 
         session_id = str(payload.get("session_id") or "").strip() or str(uuid4())
+        graph_id = str(payload.get("graph_id") or payload.get("app_version_id") or session_id).strip()
         headless = coerce_bool(nested_settings.get("headless"), bool(getattr(settings, "HEADLESS", True)))
         timeout_ms = coerce_int(nested_settings.get("timeout_ms"), int(getattr(settings, "TIMEOUT_MS", 3000)))
         max_states = coerce_int(nested_settings.get("max_states"), int(getattr(settings, "MAX_STATES", 1000)))
@@ -112,6 +119,26 @@ class CrawlJob:
             nested_settings.get("destructive_keywords"),
             str(getattr(settings, "DESTRUCTIVE_KEYWORDS", "")),
         )
+        use_semantic_diversity = coerce_bool(
+            nested_settings.get("use_semantic_diversity"),
+            bool(getattr(settings, "USE_SEMANTIC_DIVERSITY", True)),
+        )
+        semantic_diversity_threshold = coerce_float(
+            nested_settings.get("semantic_diversity_threshold"),
+            float(getattr(settings, "SEMANTIC_DIVERSITY_THRESHOLD", 0.90)),
+        )
+        semantic_uncertainty_margin = coerce_float(
+            nested_settings.get("semantic_uncertainty_margin"),
+            float(getattr(settings, "SEMANTIC_UNCERTAINTY_MARGIN", 0.05)),
+        )
+        semantic_max_bank_size = coerce_int(
+            nested_settings.get("semantic_max_bank_size"),
+            int(getattr(settings, "SEMANTIC_MAX_BANK_SIZE", 1000)),
+        )
+        semantic_artifact_dir = coerce_str(
+            nested_settings.get("semantic_artifact_dir"),
+            str(getattr(settings, "SEMANTIC_ARTIFACT_DIR", "")),
+        )
         input_defaults_path = _default_input_config_path()
 
         input_defaults = payload.get("input_defaults")
@@ -121,6 +148,7 @@ class CrawlJob:
         return CrawlJob(
             base_url=base_url,
             session_id=session_id,
+            graph_id=graph_id,
             headless=headless,
             timeout_ms=timeout_ms,
             max_states=max_states,
@@ -138,6 +166,11 @@ class CrawlJob:
             click_non_http_links=click_non_http_links,
             defer_destructive_actions=defer_destructive_actions,
             destructive_keywords=destructive_keywords,
+            use_semantic_diversity=use_semantic_diversity,
+            semantic_diversity_threshold=semantic_diversity_threshold,
+            semantic_uncertainty_margin=semantic_uncertainty_margin,
+            semantic_max_bank_size=semantic_max_bank_size,
+            semantic_artifact_dir=semantic_artifact_dir,
             input_defaults=input_defaults,
             input_defaults_path=input_defaults_path,
         )

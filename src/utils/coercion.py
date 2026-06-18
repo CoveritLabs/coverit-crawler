@@ -22,6 +22,24 @@ def coerce_int(value: Any, default: int) -> int:
     return default
 
 
+def coerce_float(value: Any, default: float) -> float:
+    if value is None or isinstance(value, bool):
+        return default
+
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    if isinstance(value, str):
+        stripped = value.strip()
+
+        if not stripped:
+            return default
+
+        return float(stripped)
+
+    return default
+
+
 def coerce_bool(value: Any, default: bool) -> bool:
     if value is None:
         return default
