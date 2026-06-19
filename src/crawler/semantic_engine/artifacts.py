@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 import joblib
@@ -56,6 +57,33 @@ class ModelArtifactLoader:
             payload=raw["payload"],
             metrics=dict(raw.get("metrics") or {}),
         )
+
+
+_MODEL_BUNDLE_CACHE: dict[tuple[str, str, str], ModelBundle] = {}
+_MODEL_BUNDLE_CACHE_LOCK = Lock()
+
+
+def load_cached_model_bundle(
+    artifact_dir: str | Path,
+    filename: str,
+    expected_kind: str,
+) -> ModelBundle:
+    artifact_path = Path(artifact_dir).expanduser().resolve()
+    cache_key = (str(artifact_path), filename, expected_kind)
+
+    with _MODEL_BUNDLE_CACHE_LOCK:
+        cached = _MODEL_BUNDLE_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
+        bundle = ModelArtifactLoader(artifact_path).load(filename, expected_kind)
+        _MODEL_BUNDLE_CACHE[cache_key] = bundle
+        return bundle
+
+
+def clear_model_bundle_cache() -> None:
+    with _MODEL_BUNDLE_CACHE_LOCK:
+        _MODEL_BUNDLE_CACHE.clear()
 
 
 def save_model_bundle(

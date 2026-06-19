@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 
 from src.crawler import ActionType, HtmlTag, InputType
 from src.crawler.replay import StateReplayInfo
-from src.crawler.session.types import DeferredWorkItem
 from src.models import AbstractState, CrawlAction
 from src.utils import (
+    element_identity_key,
     element_label,
     element_tag,
     element_tag_hint,
@@ -14,6 +15,7 @@ from src.utils import (
     is_button,
     is_non_http_href,
     is_text_input,
+    stable_json_dumps,
     supports_enter_submission,
     text_input_label,
 )
@@ -23,30 +25,37 @@ logger = logging.getLogger(__name__)
 
 class CrawlSessionExploreMixin:
     async def _explore_state(self, current: AbstractState) -> None:
-        if not await self._replay_state(current):
-            return
-
-        await self._prepare_state()
-
-        current_info = self._get_current_state_info(current)
-
-        if not current_info or not self.executor:
-            return
-
-        state_elements = await self.browser.get_interactable_elements()
-
-        if self._semantic_engine:
-            comparison = self._semantic_engine.register_state(
-                current.state_hash,
-                state_elements,
-            )
-            diagnostics = self._semantic_engine.explain_comparison(comparison)
-            logger.debug("State %s: %s", current.state_hash, diagnostics)
-            if not comparison.is_novel and comparison.reason != "already_registered":
+        try:
+            if not await self._replay_state(current):
                 return
 
-        await self._explore_forms(current, current_info)
-        await self._explore_elements(current, current_info, state_elements)
+            await self._prepare_state()
+
+            current_info = await self._get_current_state_info(current)
+
+            if not current_info or not self.executor:
+                return
+
+            state_elements = await self.browser.get_interactable_elements()
+
+            if self._semantic_engine:
+                comparison = await self._semantic_engine.register_state(
+                    current.state_hash,
+                    state_elements,
+                )
+                diagnostics = self._semantic_engine.explain_comparison(comparison)
+                logger.debug("State %s: %s", current.state_hash, diagnostics)
+                if not comparison.is_novel and comparison.reason != "already_registered":
+                    return
+
+            await self._explore_forms(current, current_info)
+            await self._explore_elements(current, current_info, state_elements)
+        finally:
+            await self.graph_builder.mark_state_explored(
+                self.session_id,
+                current.state_hash,
+                crawl_session_id=self.crawl_session_id,
+            )
 
     async def _explore_forms(
         self,
@@ -105,7 +114,7 @@ class CrawlSessionExploreMixin:
         primary = actions[-1]
 
         if self._should_defer_action(primary, form.get("submit")):
-            self._defer_work(current, actions, form.get("submit"))
+            await self._defer_work(current, actions, form.get("submit"))
             return
 
         await self._execute_action_sequence(current, current_info, actions)
@@ -130,7 +139,7 @@ class CrawlSessionExploreMixin:
             primary = actions[-1]
 
             if self._should_defer_action(primary, element):
-                self._defer_work(current, actions, element)
+                await self._defer_work(current, actions, element)
                 continue
 
             await self._execute_action_sequence(current, current_info, actions)
@@ -204,6 +213,7 @@ class CrawlSessionExploreMixin:
                         metadata={
                             "option": str(option.get("text", "")),
                             "frame": element.get("frame"),
+                            "element_key": element_identity_key(element),
                         },
                     )
                 ]
@@ -227,6 +237,7 @@ class CrawlSessionExploreMixin:
                     metadata={
                         "type": input_type,
                         "frame": element.get("frame"),
+                        "element_key": element_identity_key(element),
                     },
                 )
             ]
@@ -252,6 +263,7 @@ class CrawlSessionExploreMixin:
             metadata={
                 "type": element_type(element),
                 "frame": element.get("frame"),
+                "element_key": element_identity_key(element),
             },
         )
 
@@ -266,7 +278,10 @@ class CrawlSessionExploreMixin:
                         selector=selector,
                         value="Enter",
                         description=f"Press Enter in {label}",
-                        metadata={"frame": element.get("frame")},
+                        metadata={
+                            "frame": element.get("frame"),
+                            "element_key": element_identity_key(element),
+                        },
                     ),
                 ]
             )
@@ -287,7 +302,10 @@ class CrawlSessionExploreMixin:
                     action_type=ActionType.CLICK,
                     selector=selector,
                     description=(f"Click link {element_label(element, selector)}{href_part}"),
-                    metadata={"frame": element.get("frame")},
+                    metadata={
+                        "frame": element.get("frame"),
+                        "element_key": element_identity_key(element),
+                    },
                 )
             ]
         ]
@@ -303,7 +321,10 @@ class CrawlSessionExploreMixin:
                     action_type=ActionType.CLICK,
                     selector=selector,
                     description=(f"Click button {element_label(element, selector)}"),
-                    metadata={"frame": element.get("frame")},
+                    metadata={
+                        "frame": element.get("frame"),
+                        "element_key": element_identity_key(element),
+                    },
                 )
             ]
         ]
@@ -319,7 +340,10 @@ class CrawlSessionExploreMixin:
                     action_type=ActionType.CLICK,
                     selector=selector,
                     description=(f"Click {element_tag_hint(element)}{element_label(element, selector)}"),
-                    metadata={"frame": element.get("frame")},
+                    metadata={
+                        "frame": element.get("frame"),
+                        "element_key": element_identity_key(element),
+                    },
                 )
             ]
         ]
@@ -348,14 +372,14 @@ class CrawlSessionExploreMixin:
         except Exception:
             return False
 
-    def _get_current_state_info(
+    async def _get_current_state_info(
         self,
         current: AbstractState,
     ) -> StateReplayInfo | None:
         if not self.replayer:
             return None
 
-        return self.replayer.get_info(current.state_hash)
+        return await self.replayer.get_info(current.state_hash)
 
     def _should_defer_action(
         self,
@@ -364,18 +388,28 @@ class CrawlSessionExploreMixin:
     ) -> bool:
         return self._settings.DEFER_DESTRUCTIVE_ACTIONS and self._risk.is_risky(action, element=element)
 
-    def _defer_work(
+    async def _defer_work(
         self,
         current: AbstractState,
         actions: list[CrawlAction],
         element: dict | None,
     ) -> None:
-        self._deferred_work.append(
-            DeferredWorkItem(
-                source_state=current,
-                actions=actions,
-                element=element,
-            )
+        actions_json = stable_json_dumps([StateReplayInfo.action_to_dict(action) for action in actions])
+        element_json = stable_json_dumps(element or {})
+        raw_id = stable_json_dumps(
+            {
+                "source": current.state_hash,
+                "actions": actions_json,
+                "element": element_json,
+            }
+        )
+        await self.graph_builder.add_deferred_work(
+            self.session_id,
+            crawl_session_id=self.crawl_session_id,
+            work_id=hashlib.sha256(raw_id.encode("utf-8")).hexdigest(),
+            source_state_hash=current.state_hash,
+            actions_json=actions_json,
+            element_json=element_json,
         )
 
     def _is_blocked_anchor(self, element: dict) -> bool:

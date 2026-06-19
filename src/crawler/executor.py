@@ -7,7 +7,7 @@ from src.crawler.enums import ActionType, HtmlTag, InputType
 from src.crawler.input_resolver import InputValueResolver
 from src.crawler.semantic_engine import SemanticEngine
 from src.models import AbstractTransition, CrawlAction
-from src.utils import element_display_hint
+from src.utils import element_display_hint, element_identity_key
 
 
 class EventExecutor:
@@ -262,6 +262,7 @@ class EventExecutor:
                 "form_method": form_method,
                 "form_action": form_action,
                 "frame": submit.get("frame") or form.get("frame"),
+                "element_key": submit.get("element_key") or element_identity_key(submit),
             },
         )
 
@@ -290,6 +291,7 @@ class EventExecutor:
             "form_id": form.get("form_id"),
             "field": field.get("name") or field.get("id"),
             "frame": field.get("frame") or form.get("frame"),
+            "element_key": field.get("element_key") or element_identity_key(field),
         }
 
     def _field_tag(self, field: dict) -> str:

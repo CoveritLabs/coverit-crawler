@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from src.crawler.semantic_engine.artifacts import ArtifactError, ModelArtifactLoader
+from src.crawler.semantic_engine.artifacts import ArtifactError, load_cached_model_bundle
 from src.crawler.semantic_engine.extractor import DOMFeatureExtractor
 from src.crawler.semantic_engine.features import SklearnElementFeatureEncoder
 from src.crawler.semantic_engine.resolver import InputResolver, ResolvedInput
@@ -32,6 +32,8 @@ class SemanticEngine:
         max_bank_size: int = 1000,
         topic_classifier: TopicClassifier | None = None,
         comparison_bank: StateComparisonBank | None = None,
+        graph_store: Any | None = None,
+        session_id: str | None = None,
     ):
         self.extractor = DOMFeatureExtractor()
         self._enabled = enabled
@@ -45,6 +47,8 @@ class SemanticEngine:
                 threshold=similarity_threshold,
                 uncertainty_margin=uncertainty_margin,
                 max_bank_size=max_bank_size,
+                graph_store=graph_store,
+                session_id=session_id,
             )
 
         self.resolver = InputResolver(
@@ -82,7 +86,7 @@ class SemanticEngine:
             input_defaults=input_defaults,
         )
 
-    def register_state(
+    async def register_state(
         self,
         state_hash: str,
         elements: list[dict[str, Any]],
@@ -97,9 +101,20 @@ class SemanticEngine:
                 {},
                 "semantic_engine_unavailable",
             )
+        comparison_bank = self._comparison_bank
+        if comparison_bank is None:
+            return StateComparisonResult(
+                state_hash,
+                True,
+                False,
+                None,
+                0.0,
+                {},
+                "semantic_engine_unavailable",
+            )
 
         try:
-            return self._comparison_bank.register(state_hash, elements)
+            return await comparison_bank.register(state_hash, elements)
         except Exception:
             logger.exception("Semantic state comparison failed open")
             return StateComparisonResult(
@@ -135,10 +150,15 @@ class SemanticEngine:
         threshold: float,
         uncertainty_margin: float,
         max_bank_size: int,
+        graph_store: Any | None = None,
+        session_id: str | None = None,
     ) -> None:
-        loader = ModelArtifactLoader(artifact_dir)
         try:
-            topic_bundle = loader.load("topic_model.joblib", "topic_classifier")
+            topic_bundle = load_cached_model_bundle(
+                artifact_dir,
+                "topic_model.joblib",
+                "topic_classifier",
+            )
             topic_classifier = SklearnTopicClassifier(
                 topic_bundle.payload["pipeline"],
                 thresholds=topic_bundle.payload.get("thresholds"),
@@ -158,7 +178,8 @@ class SemanticEngine:
             return
 
         try:
-            state_bundle = loader.load(
+            state_bundle = load_cached_model_bundle(
+                artifact_dir,
                 "state_equivalence.joblib",
                 "state_equivalence",
             )
@@ -177,6 +198,8 @@ class SemanticEngine:
                 threshold=threshold,
                 uncertainty_margin=uncertainty_margin,
                 max_size=max_bank_size,
+                graph_store=graph_store,
+                session_id=session_id,
             )
         except (ArtifactError, KeyError, TypeError, ValueError) as exc:
             self._load_error = str(exc)

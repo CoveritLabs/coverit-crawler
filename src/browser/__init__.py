@@ -3,10 +3,11 @@ from __future__ import annotations
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
-__all__ = ["BrowserEngine"]
+__all__ = ["BrowserEngine", "BrowserRuntime"]
 
 _EXPORTS: dict[str, tuple[str, str]] = {
     "BrowserEngine": ("src.browser.engine", "BrowserEngine"),
+    "BrowserRuntime": ("src.browser.runtime", "BrowserRuntime"),
 }
 
 
@@ -26,3 +27,4 @@ def __dir__() -> list[str]:
 
 if TYPE_CHECKING:
     from src.browser.engine import BrowserEngine
+    from src.browser.runtime import BrowserRuntime

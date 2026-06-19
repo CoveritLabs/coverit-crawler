@@ -24,14 +24,102 @@ class Neo4jGraphBuilder:
             raise RuntimeError("graph is not connected")
         return self._repo
 
-    async def add_state(self, session_id: str, state: AbstractState) -> None:
-        await self.repo.add_state(session_id, state)
+    async def add_state(
+        self,
+        session_id: str,
+        state: AbstractState,
+        *,
+        enqueue: bool = True,
+        crawl_session_id: str = "",
+    ) -> bool:
+        return await self.repo.add_state(session_id, state, enqueue=enqueue, crawl_session_id=crawl_session_id)
+
+    async def mark_state_pending(self, session_id: str, state_hash: str, *, crawl_session_id: str = "") -> bool:
+        return await self.repo.mark_state_pending(session_id, state_hash, crawl_session_id=crawl_session_id)
+
+    async def claim_next_pending_state(self, session_id: str, *, crawl_session_id: str = "") -> AbstractState | None:
+        return await self.repo.claim_next_pending_state(session_id, crawl_session_id=crawl_session_id)
+
+    async def mark_state_explored(self, session_id: str, state_hash: str, *, crawl_session_id: str = "") -> None:
+        await self.repo.mark_state_explored(session_id, state_hash, crawl_session_id=crawl_session_id)
 
     async def set_state_properties(self, session_id: str, state_hash: str, props: dict) -> None:
         await self.repo.set_state_properties(session_id, state_hash, props)
 
-    async def add_transition(self, transition: AbstractTransition) -> None:
-        await self.repo.add_transition(transition)
+    async def add_transition(self, transition: AbstractTransition) -> bool:
+        return await self.repo.add_transition(transition)
+
+    async def mark_action_attempted(
+        self,
+        session_id: str,
+        state_hash: str,
+        attempt_fingerprint: str,
+        *,
+        crawl_session_id: str = "",
+    ) -> bool:
+        return await self.repo.mark_action_attempted(
+            session_id,
+            state_hash,
+            attempt_fingerprint,
+            crawl_session_id=crawl_session_id,
+        )
+
+    async def try_increment_action_repeat(
+        self,
+        session_id: str,
+        *,
+        scope: str,
+        action_key: str,
+        max_repeats: int,
+        crawl_session_id: str = "",
+    ) -> bool:
+        return await self.repo.try_increment_action_repeat(
+            session_id,
+            crawl_session_id=crawl_session_id,
+            scope=scope,
+            action_key=action_key,
+            max_repeats=max_repeats,
+        )
+
+    async def upsert_replay_info_if_better(self, session_id: str, state_hash: str, props: dict, score: list) -> bool:
+        return await self.repo.upsert_replay_info_if_better(session_id, state_hash, props, score)
+
+    async def get_replay_info(self, session_id: str, state_hash: str) -> dict | None:
+        return await self.repo.get_replay_info(session_id, state_hash)
+
+    async def add_deferred_work(
+        self,
+        session_id: str,
+        *,
+        crawl_session_id: str = "",
+        work_id: str,
+        source_state_hash: str,
+        actions_json: str,
+        element_json: str,
+    ) -> None:
+        await self.repo.add_deferred_work(
+            session_id,
+            crawl_session_id=crawl_session_id,
+            work_id=work_id,
+            source_state_hash=source_state_hash,
+            actions_json=actions_json,
+            element_json=element_json,
+        )
+
+    async def claim_deferred_work(self, session_id: str, *, crawl_session_id: str = "") -> dict | None:
+        return await self.repo.claim_deferred_work(session_id, crawl_session_id=crawl_session_id)
+
+    async def mark_deferred_work_processed(self, session_id: str, work_id: str, *, crawl_session_id: str = "") -> None:
+        await self.repo.mark_deferred_work_processed(session_id, work_id, crawl_session_id=crawl_session_id)
+
+    async def upsert_semantic_profile(self, session_id: str, state_hash: str, payload: dict) -> None:
+        await self.repo.upsert_semantic_profile(session_id, state_hash, payload)
+
+    async def get_semantic_profile(self, session_id: str, state_hash: str) -> dict | None:
+        return await self.repo.get_semantic_profile(session_id, state_hash)
+
+    def iter_semantic_profiles(self, session_id: str, *, state_hash: str, batch_size: int):
+        return self.repo.iter_semantic_profiles(session_id, state_hash=state_hash, batch_size=batch_size)
 
     async def get_state_graph(self, session_id: str) -> dict:
         return await self.repo.get_state_graph(session_id)

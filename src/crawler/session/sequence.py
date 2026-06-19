@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 
 from src.crawler.fingerprints import (
@@ -13,7 +14,6 @@ from src.crawler.session.sequence_builders import (
     sequence_digest,
     sequence_value_for_graph,
 )
-from src.crawler.session.types import DeferredWorkItem
 from src.models import AbstractState, AbstractTransition, CrawlAction
 from src.utils import is_http_url, is_same_domain, normalize_checkpoint_url, normalize_url
 
@@ -40,17 +40,25 @@ class CrawlSessionSequenceMixin:
         scope_url = normalize_url(getattr(source, "url", "") or source_info.checkpoint_url or "")
 
         action_key = action_key_fingerprint(primary)
-
-        if not self._action_repeat_limiter.can_run(scope=scope_url, action_key=action_key):
-            return None
-
         attempt_fp = action_attempt_fingerprint(source.state_hash, primary)
-        tried = self._tried_actions_by_state.setdefault(source.state_hash, set())
 
-        if attempt_fp in tried:
+        if not await self.graph_builder.mark_action_attempted(
+            self.session_id,
+            source.state_hash,
+            attempt_fp,
+            crawl_session_id=self.crawl_session_id,
+        ):
             return None
 
-        tried.add(attempt_fp)
+        can_run = await self.graph_builder.try_increment_action_repeat(
+            self.session_id,
+            scope=scope_url,
+            action_key=action_key,
+            max_repeats=int(getattr(self._settings, "MAX_ACTION_REPEATS_PER_URL", 2)),
+            crawl_session_id=self.crawl_session_id,
+        )
+        if not can_run:
+            return None
 
         initial_page_count = len(self.browser.context.pages) if self.browser.context else 0
 
@@ -61,8 +69,6 @@ class CrawlSessionSequenceMixin:
 
             await self.browser.wait_for_settle()
 
-            self._action_repeat_limiter.record(scope=scope_url, action_key=action_key)
-
             popup_urls = await self.browser.collect_and_close_pages_opened_since(initial_page_count)
 
             for url in popup_urls:
@@ -71,12 +77,10 @@ class CrawlSessionSequenceMixin:
                 if not is_same_domain(scope_url, url):
                     continue
 
-                self._deferred_work.append(
-                    DeferredWorkItem(
-                        source_state=source,
-                        actions=[CrawlAction(action_type="navigate", value=url, description="Navigate to popup URL")],
-                        element=None,
-                    )
+                await self._defer_work(
+                    source,
+                    [CrawlAction(action_type="navigate", value=url, description="Navigate to popup URL")],
+                    None,
                 )
 
             new_url = await self.browser.get_current_url()
@@ -99,7 +103,7 @@ class CrawlSessionSequenceMixin:
 
             if self._semantic_engine:
                 new_state_elements = await self.browser.get_interactable_elements()
-                comparison = self._semantic_engine.register_state(
+                comparison = await self._semantic_engine.register_state(
                     new_state.state_hash,
                     new_state_elements,
                 )
@@ -129,9 +133,8 @@ class CrawlSessionSequenceMixin:
 
             updated = False
             if not is_semantic_duplicate:
-                updated = self.replayer.register(new_state.state_hash, info)
-
                 await self.add_to_queue(new_state)
+                updated = await self.replayer.register(new_state.state_hash, info)
 
                 if updated:
                     await self._persist_replay_artifacts(
@@ -174,6 +177,7 @@ class CrawlSessionSequenceMixin:
 
         return AbstractTransition(
             session_id=str(self.session_id),
+            crawl_session_id=str(self.crawl_session_id),
             transition_id=fp,
             source_state_hash=source.state_hash,
             target_state_hash=target.state_hash,
@@ -183,6 +187,7 @@ class CrawlSessionSequenceMixin:
             locator_value=locator_value,
             action_value=sequence_value_for_graph(actions),
             action_fingerprint=fp,
+            action_stable_key=action_key_fingerprint(primary),
         )
 
     def _build_replay_info(
@@ -238,7 +243,6 @@ class CrawlSessionSequenceMixin:
             return
 
         storage_state = await self.browser.export_storage_state()
-        info.storage_state = storage_state
 
         await self.graph_builder.set_state_properties(
             self.session_id,
@@ -246,21 +250,38 @@ class CrawlSessionSequenceMixin:
             {"checkpoint_storage_state_json": storage_state},
         )
 
-    async def _run_deferred_item(self, item: DeferredWorkItem) -> None:
+    async def _run_deferred_item(self, item: dict) -> None:
         if not self.replayer:
             return
 
         await self._wait_permission()
+        work_id = str(item.get("work_id") or "")
 
         try:
-            ok = await self.replayer.replay_to(item.source_state.state_hash)
+            source_hash = str(item.get("source_state_hash") or "")
+            actions = [
+                StateReplayInfo.action_from_dict(raw)
+                for raw in json.loads(str(item.get("actions_json") or "[]"))
+                if isinstance(raw, dict)
+            ]
+            if not source_hash or not actions:
+                return
+
+            ok = await self.replayer.replay_to(source_hash)
             if not ok:
                 return
+            source_info = await self.replayer.get_info(source_hash)
+            if not source_info:
+                return
+
+            source_state = AbstractState(state_hash=source_hash, url=source_info.checkpoint_url, html="")
+            await self._execute_action_sequence(source_state, source_info, actions)
         except Exception:
             return
-
-        source_info = self.replayer.get_info(item.source_state.state_hash)
-        if not source_info:
-            return
-
-        await self._execute_action_sequence(item.source_state, source_info, item.actions)
+        finally:
+            if work_id:
+                await self.graph_builder.mark_deferred_work_processed(
+                    self.session_id,
+                    work_id,
+                    crawl_session_id=self.crawl_session_id,
+                )
