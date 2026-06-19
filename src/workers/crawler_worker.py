@@ -7,6 +7,7 @@ from dataclasses import replace
 from typing import Optional
 
 from src import Config, config
+from src.browser import BrowserRuntime
 from src.crawler import CrawlSession
 from src.graph import Neo4jGraphBuilder
 from src.models import CrawlJob
@@ -47,33 +48,45 @@ class CrawlerWorker:
     def __init__(self, settings: Config = config):
         self._settings = settings
         self._graph_builder = Neo4jGraphBuilder(settings.NEO4J_URI, settings.NEO4J_USER, settings.NEO4J_PASSWORD)
+        self._browser_runtime = BrowserRuntime(headless=settings.HEADLESS)
         self._started = False
 
     async def start(self) -> None:
         if self._started:
             return
         await self._graph_builder.connect()
+        await self._browser_runtime.start()
         self._started = True
 
     async def stop(self) -> None:
         if not self._started:
             return
-        await self._graph_builder.disconnect()
-        self._started = False
+        try:
+            await self._browser_runtime.stop()
+        finally:
+            await self._graph_builder.disconnect()
+            self._started = False
 
     async def process(self, job: CrawlJob, run_permission: Optional[asyncio.Event] = None) -> tuple[int, int]:
         job_settings = _job_settings(self._settings, job)
+        browser_runtime = (
+            self._browser_runtime
+            if job.headless == self._browser_runtime.headless
+            else None
+        )
         session = CrawlSession(
             base_url=job.base_url,
             graph_builder=self._graph_builder,
             config_path=job.input_defaults_path,
             session_id=job.graph_id,
+            crawl_session_id=job.session_id,
             headless=job.headless,
             max_states=job.max_states,
             max_transitions=job.max_transitions,
             timeout_ms=job.timeout_ms,
             input_defaults=job.input_defaults,
             settings=job_settings,
+            browser_runtime=browser_runtime,
             run_permission=run_permission,
         )
         await session.run_crawl()

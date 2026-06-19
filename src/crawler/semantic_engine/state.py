@@ -35,6 +35,30 @@ class StateSemanticProfile:
     structural_distribution: np.ndarray
     element_count: int
 
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "state_hash": self.state_hash,
+            "element_vectors": self.element_vectors.tolist(),
+            "pooled_vector": self.pooled_vector.tolist(),
+            "topic_distribution": self.topic_distribution.tolist(),
+            "structural_distribution": self.structural_distribution.tolist(),
+            "element_count": self.element_count,
+        }
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> StateSemanticProfile | None:
+        try:
+            return cls(
+                state_hash=str(payload.get("state_hash") or ""),
+                element_vectors=np.asarray(payload.get("element_vectors") or [], dtype=float),
+                pooled_vector=np.asarray(payload.get("pooled_vector") or [], dtype=float),
+                topic_distribution=np.asarray(payload.get("topic_distribution") or [], dtype=float),
+                structural_distribution=np.asarray(payload.get("structural_distribution") or [], dtype=float),
+                element_count=int(payload.get("element_count") or 0),
+            )
+        except Exception:
+            return None
+
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, StateSemanticProfile)
@@ -206,12 +230,18 @@ class StateComparisonBank:
         threshold: float,
         uncertainty_margin: float,
         max_size: int,
+        graph_store: Any | None = None,
+        session_id: str | None = None,
+        batch_size: int = 100,
     ):
         self._profiler = profiler
         self._classifier = classifier
         self._threshold = threshold
         self._uncertainty_margin = uncertainty_margin
         self._max_size = max(1, max_size)
+        self._graph_store = graph_store
+        self._session_id = session_id
+        self._batch_size = max(1, int(batch_size))
         self._profiles: OrderedDict[str, StateSemanticProfile] = OrderedDict()
 
     @property
@@ -242,10 +272,109 @@ class StateComparisonBank:
             "scores": result.scores,
         }
         if result.scores and hasattr(self._classifier, "explain_scores"):
-            explanation.update(self._classifier.explain_scores(result.scores))
+            explain_scores = getattr(self._classifier, "explain_scores", None)
+            if callable(explain_scores):
+                extra = explain_scores(result.scores)
+                if isinstance(extra, dict):
+                    explanation.update(extra)
         return explanation
 
-    def register(
+    async def register(
+        self,
+        state_hash: str,
+        elements: list[dict[str, Any]],
+    ) -> StateComparisonResult:
+        if self._graph_store is not None and self._session_id:
+            return await self._register_persisted(state_hash, elements)
+        return self._register_local(state_hash, elements)
+
+    async def _register_persisted(
+        self,
+        state_hash: str,
+        elements: list[dict[str, Any]],
+    ) -> StateComparisonResult:
+        graph_store = self._graph_store
+        session_id = self._session_id
+        if graph_store is None or not session_id:
+            return self._register_local(state_hash, elements)
+
+        existing = await graph_store.get_semantic_profile(session_id, state_hash)
+        if existing is not None:
+            return StateComparisonResult(
+                state_hash,
+                False,
+                True,
+                state_hash,
+                1.0,
+                {},
+                "already_registered",
+            )
+
+        candidate = self._profiler.profile(state_hash, elements)
+        if candidate.element_count == 0 or not np.any(candidate.pooled_vector):
+            return await self._accept_persisted(candidate, "empty_or_unusable_profile")
+
+        best_hash: str | None = None
+        best_confidence = 0.0
+        best_scores: dict[str, float] = {}
+        seen = 0
+
+        async for payload in graph_store.iter_semantic_profiles(
+            session_id,
+            state_hash=state_hash,
+            batch_size=self._batch_size,
+        ):
+            known = StateSemanticProfile.from_payload(payload)
+            if known is None:
+                continue
+            seen += 1
+            if seen > self._max_size:
+                break
+            confidence, scores = self._classifier.compare(candidate, known)
+            if confidence > best_confidence:
+                best_hash = known.state_hash
+                best_confidence = confidence
+                best_scores = scores
+
+        confident_equivalence = (
+            best_hash is not None
+            and best_confidence >= self._threshold + self._uncertainty_margin
+        )
+        high_similarity_equivalence = (
+            best_hash is not None
+            and self._is_high_similarity_equivalence(best_scores)
+        )
+        if confident_equivalence or high_similarity_equivalence:
+            reason = (
+                "confident_equivalence"
+                if confident_equivalence
+                else "high_similarity_equivalence"
+            )
+            return StateComparisonResult(
+                state_hash,
+                False,
+                True,
+                best_hash,
+                best_confidence,
+                best_scores,
+                reason,
+            )
+
+        reason = (
+            "uncertain_comparison"
+            if best_hash is not None
+            and best_confidence >= self._threshold - self._uncertainty_margin
+            else "novel_state"
+        )
+        return await self._accept_persisted(
+            candidate,
+            reason,
+            best_hash,
+            best_confidence,
+            best_scores,
+        )
+
+    def _register_local(
         self,
         state_hash: str,
         elements: list[dict[str, Any]],
@@ -313,11 +442,40 @@ class StateComparisonBank:
             best_scores,
         )
 
+    async def _accept_persisted(
+        self,
+        profile: StateSemanticProfile,
+        reason: str,
+        matched_hash: str | None = None,
+        confidence: float = 0.0,
+        scores: dict[str, float] | None = None,
+    ) -> StateComparisonResult:
+        graph_store = self._graph_store
+        session_id = self._session_id
+        if graph_store is None or not session_id:
+            return self._accept(profile, reason, matched_hash, confidence, scores)
+
+        await graph_store.upsert_semantic_profile(
+            session_id,
+            profile.state_hash,
+            profile.to_payload(),
+        )
+        return StateComparisonResult(
+            profile.state_hash,
+            True,
+            False,
+            matched_hash,
+            confidence,
+            scores or {},
+            reason,
+        )
+
     def _is_high_similarity_equivalence(self, scores: dict[str, float]) -> bool:
         if not scores:
             return False
         if hasattr(self._classifier, "predicts_equivalent"):
-            if not self._classifier.predicts_equivalent(scores):
+            predicts_equivalent = getattr(self._classifier, "predicts_equivalent", None)
+            if callable(predicts_equivalent) and not predicts_equivalent(scores):
                 return False
         return all(
             scores.get(name, 0.0) >= minimum

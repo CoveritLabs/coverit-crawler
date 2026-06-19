@@ -9,29 +9,27 @@ from src.models import CrawlAction
 
 
 class StateReplayer:
-    def __init__(self, browser: BrowserEngine, executor, settings: Config = config):
+    def __init__(self, browser: BrowserEngine, executor, graph_store, session_id: str, settings: Config = config):
         self._browser = browser
         self._executor = executor
+        self._graph_store = graph_store
+        self._session_id = session_id
         self._settings = settings
-        self._replay_map: dict[str, StateReplayInfo] = {}
 
-    def register(self, state_hash: str, info: StateReplayInfo) -> bool:
-        existing = self._replay_map.get(state_hash)
-        if existing is None:
-            self._replay_map[state_hash] = info
-            return True
+    async def register(self, state_hash: str, info: StateReplayInfo) -> bool:
+        return await self._graph_store.upsert_replay_info_if_better(
+            self._session_id,
+            state_hash,
+            info.to_neo4j_props(state_hash=state_hash),
+            list(info.score_for_state(state_hash)),
+        )
 
-        if info.score_for_state(state_hash) < existing.score_for_state(state_hash):
-            self._replay_map[state_hash] = info
-            return True
-
-        return False
-
-    def get_info(self, state_hash: str) -> StateReplayInfo | None:
-        return self._replay_map.get(state_hash)
+    async def get_info(self, state_hash: str) -> StateReplayInfo | None:
+        raw = await self._graph_store.get_replay_info(self._session_id, state_hash)
+        return StateReplayInfo.from_neo4j_record(raw)
 
     async def replay_to(self, state_hash: str) -> bool:
-        info = self._replay_map.get(state_hash)
+        info = await self.get_info(state_hash)
         if not info:
             return False
 

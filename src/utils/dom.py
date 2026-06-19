@@ -2,6 +2,7 @@ import re
 from typing import Optional
 
 from src.crawler import HtmlTag, InputType
+from src.utils.serialization import stable_json_dumps
 
 
 def css_escape(value: str) -> str:
@@ -63,6 +64,39 @@ def text_input_label(element: dict) -> str:
     return "field"
 
 
+def _compact_text(value: object, *, max_len: int = 160) -> str:
+    text = " ".join(str(value or "").split())
+    return text[:max_len]
+
+
+def element_identity_key(element: dict) -> str:
+    frame = element.get("frame") if isinstance(element.get("frame"), dict) else {}
+    selector_candidates = element.get("selector_candidates") or []
+
+    payload = {
+        "frame": {
+            "name": _compact_text(frame.get("name")),
+            "id": _compact_text(frame.get("id")),
+            "src": _compact_text(frame.get("src")),
+            "url": _compact_text(frame.get("url")),
+        },
+        "tag": element_tag(element),
+        "type": element_type(element),
+        "id": "" if str(element.get("id") or "").isdigit() else _compact_text(element.get("id")),
+        "name": _compact_text(element.get("name")),
+        "href": _compact_text(element.get("href")),
+        "role": _compact_text(element.get("role")),
+        "aria_label": _compact_text(element.get("aria_label") or element.get("aria-label")),
+        "label": _compact_text(element.get("label")),
+        "placeholder": _compact_text(element.get("placeholder")),
+        "text": _compact_text(element.get("text") or element.get("innerText")),
+        "selector": _compact_text(selector_candidates[0] if selector_candidates else element.get("selector")),
+        "css_path": _compact_text(element.get("css_path")),
+    }
+
+    return stable_json_dumps(payload)
+
+
 def element_label(element: dict, selector: str | None = None) -> str:
     parts: list[str] = []
 
@@ -119,9 +153,11 @@ def attach_selectors_to_forms(forms: list[dict]) -> list[dict]:
     for form in forms:
         for field in form.get("fields", []):
             field["selector"] = build_selector(field)
+            field["element_key"] = element_identity_key(field)
 
         if form.get("submit"):
             form["submit"]["selector"] = build_selector(form["submit"])
+            form["submit"]["element_key"] = element_identity_key(form["submit"])
     return forms
 
 

@@ -14,6 +14,7 @@ from src.browser.actions import BrowserActions
 from src.browser.frames import FrameResolver
 from src.browser.js_loader import JsLoader
 from src.browser.page_manager import PageManager
+from src.browser.runtime import BrowserRuntime
 from src.browser.state import StateManager
 from src.browser.storage_state import normalize_storage_state
 from src.config import Config, config
@@ -27,8 +28,10 @@ class BrowserEngine:
         headless: bool = True,
         timeout_ms: Optional[int] = None,
         settings: Config = config,
+        runtime: BrowserRuntime | None = None,
     ):
         self._settings = settings
+        self._runtime = runtime
         self.headless = headless
         self.timeout_ms = int(timeout_ms if timeout_ms is not None else settings.TIMEOUT_MS)
 
@@ -56,22 +59,30 @@ class BrowserEngine:
         )
 
     async def start(self) -> None:
-        self.playwright = await async_playwright().start()
-        self.browser = await self.playwright.chromium.launch(headless=self.headless)
-        self.context = await self.browser.new_context()
+        if self._runtime is not None:
+            self.context = await self._runtime.new_context()
+            self.browser = self._runtime.browser
+        else:
+            self.playwright = await async_playwright().start()
+            self.browser = await self.playwright.chromium.launch(headless=self.headless)
+            self.context = await self.browser.new_context()
         self.page = await self.context.new_page()
         self.page.set_default_timeout(self.timeout_ms)
 
     async def start_with_storage_state(self, storage_state: Any = None) -> None:
-        self.playwright = await async_playwright().start()
-        self.browser = await self.playwright.chromium.launch(headless=self.headless)
-
-        normalized = normalize_storage_state(storage_state)
-
-        if normalized is None:
-            self.context = await self.browser.new_context()
+        if self._runtime is not None:
+            self.context = await self._runtime.new_context(storage_state)
+            self.browser = self._runtime.browser
         else:
-            self.context = await self.browser.new_context(storage_state=normalized)
+            self.playwright = await async_playwright().start()
+            self.browser = await self.playwright.chromium.launch(headless=self.headless)
+
+            normalized = normalize_storage_state(storage_state)
+
+            if normalized is None:
+                self.context = await self.browser.new_context()
+            else:
+                self.context = await self.browser.new_context(storage_state=normalized)
 
         self.page = await self.context.new_page()
         self.page.set_default_timeout(self.timeout_ms)
@@ -79,10 +90,13 @@ class BrowserEngine:
     async def stop(self) -> None:
         if self.context:
             await self.context.close()
-        if self.browser:
+            self.context = None
+        if self._runtime is None and self.browser:
             await self.browser.close()
-        if self.playwright:
+            self.browser = None
+        if self._runtime is None and self.playwright:
             await self.playwright.stop()
+            self.playwright = None
 
     async def navigate(self, url: str) -> None:
         page = self._require_page()
@@ -224,6 +238,9 @@ class BrowserEngine:
         return await self._require_context().storage_state()
 
     async def new_context_from_storage_state(self, storage_state: Any = None) -> BrowserContext:
+        if self._runtime is not None:
+            return await self._runtime.new_context(storage_state)
+
         browser = self._require_browser()
         normalized = normalize_storage_state(storage_state)
 

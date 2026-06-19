@@ -1,0 +1,21 @@
+name: coverit-crawler
+
+services:
+  coverit-crawler:
+    image: coverit-crawler:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${CRAWLER_DATABASE_URL:-postgresql://postgres:postgres@host.docker.internal:15432/coverit?schema=public}
+      REDIS_URL: ${CRAWLER_REDIS_URL:-redis://host.docker.internal:6379/0}
+      # .env can keep bolt://localhost:7687 for local runs; containers reach host services through host.docker.internal.
+      NEO4J_URI: ${CRAWLER_NEO4J_URI:-bolt://host.docker.internal:7687}
+      COVERIT_API_INTERNAL_URL: ${CRAWLER_API_INTERNAL_URL:-http://host.docker.internal:3000/api/v1}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    init: true
+    shm_size: "1gb"
+    restart: unless-stopped

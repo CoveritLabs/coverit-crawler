@@ -3,17 +3,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections import deque
 from uuid import uuid4
 
 from src import Config, config
-from src.browser import BrowserEngine
-from src.crawler.action_limits import ActionRepeatLimiter
+from src.browser import BrowserEngine, BrowserRuntime
 from src.crawler.executor import EventExecutor
 from src.crawler.replay import StateReplayer, StateReplayInfo
 from src.crawler.risk import RiskClassifier
 from src.crawler.semantic_engine import SemanticEngine
-from src.crawler.session.types import DeferredWorkItem
 from src.models import AbstractState, AbstractTransition, CrawlAction
 
 logger = logging.getLogger(__name__)
@@ -32,7 +29,9 @@ class CrawlSessionBase:
         timeout_ms: int | None = None,
         input_defaults: dict | None = None,
         *,
+        crawl_session_id: str | None = None,
         browser: BrowserEngine | None = None,
+        browser_runtime: BrowserRuntime | None = None,
         settings: Config = config,
         risk_classifier: RiskClassifier | None = None,
         run_permission: asyncio.Event | None = None,
@@ -45,20 +44,16 @@ class CrawlSessionBase:
         self.config_path = config_path
         self._input_defaults = input_defaults
         self.session_id = session_id or str(uuid4())
+        self.crawl_session_id = crawl_session_id or self.session_id
 
-        self.discovered_states: set[str] = set()
-        self.discovery_queue: deque[AbstractState] = deque()
-        self._deferred_work: deque[DeferredWorkItem] = deque()
-        self._tried_actions_by_state: dict[str, set[str]] = {}
-        self._seen_transition_ids: set[str] = set()
         self._risk = risk_classifier or RiskClassifier.from_settings(settings)
         self._login_attempts = 0
-        self._action_repeat_limiter = ActionRepeatLimiter(max_repeats_per_scope=int(getattr(settings, "MAX_ACTION_REPEATS_PER_URL", 2)))
 
         self.browser = browser or BrowserEngine(
             headless=self.headless,
             timeout_ms=timeout_ms,
             settings=settings,
+            runtime=browser_runtime,
         )
         self.executor: EventExecutor | None = None
         self.replayer: StateReplayer | None = None
@@ -92,6 +87,8 @@ class CrawlSessionBase:
             similarity_threshold=self._settings.SEMANTIC_DIVERSITY_THRESHOLD,
             uncertainty_margin=self._settings.SEMANTIC_UNCERTAINTY_MARGIN,
             max_bank_size=self._settings.SEMANTIC_MAX_BANK_SIZE,
+            graph_store=self.graph_builder,
+            session_id=self.session_id,
         )
         self.executor = EventExecutor(
             self.browser,
@@ -99,7 +96,13 @@ class CrawlSessionBase:
             input_defaults=input_config,
             semantic_engine=self._semantic_engine,
         )
-        self.replayer = StateReplayer(self.browser, self.executor, self._settings)
+        self.replayer = StateReplayer(
+            self.browser,
+            self.executor,
+            self.graph_builder,
+            self.session_id,
+            self._settings,
+        )
 
         logger.info("Crawl session initialized")
 
@@ -119,32 +122,32 @@ class CrawlSessionBase:
         await self.browser.stop()
         logger.info("Crawl session completed")
 
-    async def add_to_queue(self, state: AbstractState, *, enqueue: bool = True) -> None:
-        if state.state_hash in self.discovered_states:
-            return
+    async def add_to_queue(self, state: AbstractState, *, enqueue: bool = True) -> bool:
         await self._wait_permission()
-        self._state_count += 1
-        self.discovered_states.add(state.state_hash)
-        if enqueue:
-            self.discovery_queue.append(state)
-        await self.graph_builder.add_state(self.session_id, state)
+        created = await self.graph_builder.add_state(
+            self.session_id,
+            state,
+            enqueue=enqueue,
+            crawl_session_id=self.crawl_session_id,
+        )
+        state.html = ""
+        if created:
+            self._state_count += 1
+        return created
 
-    def get_next_state(self) -> AbstractState | None:
-        return self.discovery_queue.popleft() if self.discovery_queue else None
+    async def get_next_state(self) -> AbstractState | None:
+        await self._wait_permission()
+        return await self.graph_builder.claim_next_pending_state(self.session_id, crawl_session_id=self.crawl_session_id)
 
     async def add_transition(self, transition: AbstractTransition) -> None:
-        if transition.transition_id in self._seen_transition_ids:
-            return
         await self._wait_permission()
-        self._seen_transition_ids.add(transition.transition_id)
-        self._transition_count += 1
-        await self.graph_builder.add_transition(transition)
-        if self.executor:
-            self.executor.log_transition(transition)
+        created = await self.graph_builder.add_transition(transition)
+        if created:
+            self._transition_count += 1
 
     @property
     def is_complete(self) -> bool:
-        return not self.discovery_queue
+        return False
 
     def _within_limits(self) -> bool:
         return self._state_count < self._max_states and self._transition_count < self._max_transitions
@@ -156,21 +159,24 @@ class CrawlSessionBase:
 
             while self._within_limits():
                 await self._wait_permission()
-                if not self.is_complete:
-                    current = self.get_next_state()
-                    if current:
-                        logger.info(
-                            f"Exploring state {current.state_hash} "
-                            f"({self._state_count}/{self._max_states} states, "
-                            f"{self._transition_count}/{self._max_transitions} transitions)"
-                        )
-                        await self._explore_state(current)
+                current = await self.get_next_state()
+                if current:
+                    logger.info(
+                        f"Exploring state {current.state_hash} "
+                        f"({self._state_count}/{self._max_states} states, "
+                        f"{self._transition_count}/{self._max_transitions} transitions)"
+                    )
+                    await self._explore_state(current)
                     continue
 
-                if self._settings.DEFER_DESTRUCTIVE_ACTIONS and self._deferred_work:
-                    item = self._deferred_work.popleft()
-                    await self._run_deferred_item(item)
-                    continue
+                if self._settings.DEFER_DESTRUCTIVE_ACTIONS:
+                    item = await self.graph_builder.claim_deferred_work(
+                        self.session_id,
+                        crawl_session_id=self.crawl_session_id,
+                    )
+                    if item:
+                        await self._run_deferred_item(item)
+                        continue
 
                 break
 
@@ -194,7 +200,7 @@ class CrawlSessionBase:
 
         if self._semantic_engine:
             initial_elements = await self.browser.get_interactable_elements()
-            self._semantic_engine.register_state(initial_state.state_hash, initial_elements)
+            await self._semantic_engine.register_state(initial_state.state_hash, initial_elements)
 
         await self.add_to_queue(initial_state, enqueue=not bool(login_actions))
 
@@ -203,7 +209,7 @@ class CrawlSessionBase:
             checkpoint_state_hash=initial_state.state_hash,
             checkpoint_kind="initial",
         )
-        updated = self.replayer.register(initial_state.state_hash, info)
+        updated = await self.replayer.register(initial_state.state_hash, info)
         if updated:
             await self._persist_replay_artifacts(
                 state_hash=initial_state.state_hash,
@@ -215,7 +221,11 @@ class CrawlSessionBase:
         if login_actions:
             reached = await self._execute_action_sequence(initial_state, info, login_actions)
             if not reached:
-                self.discovery_queue.append(initial_state)
+                await self.graph_builder.mark_state_pending(
+                    self.session_id,
+                    initial_state.state_hash,
+                    crawl_session_id=self.crawl_session_id,
+                )
 
     async def _plan_login_actions(self) -> list[CrawlAction] | None:
         if self._login_attempts >= 2:

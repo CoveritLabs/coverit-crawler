@@ -1,16 +1,32 @@
+import json
 from typing import Any
 
 from neo4j import AsyncDriver
 
 from src.graph.queries import (
+    ADD_DEFERRED_WORK,
     ADD_STATE,
     ADD_TRANSITION,
+    CLAIM_DEFERRED_WORK,
+    CLAIM_NEXT_PENDING_STATE,
     CLEAR_SESSION,
+    FIND_EQUIVALENT_TRANSITION,
     GET_ACTIONS,
     GET_DATA_FROM_FLOW_QUERY,
     GET_GRAPH,
     GET_LIGHTWEIGHT_FLOW_GRAPH,
+    GET_REPLAY_INFO,
+    GET_SEMANTIC_PROFILE,
+    ITER_SEMANTIC_PROFILES,
+    MARK_ACTION_ATTEMPTED,
+    MARK_DEFERRED_WORK_PROCESSED,
+    MARK_STATE_EXPLORED,
+    MARK_STATE_PENDING,
     SET_STATE_PROPS,
+    TRY_INCREMENT_ACTION_REPEAT,
+    UPDATE_TRANSITION,
+    UPSERT_REPLAY_INFO_IF_BETTER,
+    UPSERT_SEMANTIC_PROFILE,
 )
 from src.models import AbstractState, AbstractTransition
 from src.utils.serialization import stable_json_dumps
@@ -35,15 +51,63 @@ class GraphRepository:
     def _normalize_props(self, props: dict) -> dict:
         return {key: self._normalize_prop_value(value) for key, value in props.items()}
 
-    async def add_state(self, session_id: str, state: AbstractState) -> None:
+    async def add_state(
+        self,
+        session_id: str,
+        state: AbstractState,
+        *,
+        enqueue: bool = True,
+        crawl_session_id: str = "",
+    ) -> bool:
         async with self._driver.session() as session:
-            await session.run(
+            result = await session.run(
                 ADD_STATE,
                 session_id=session_id,
                 state_hash=state.state_hash,
                 url=state.url,
                 title=state.title,
                 html=state.html,
+                enqueue=enqueue,
+                crawl_session_id=crawl_session_id,
+            )
+            record = await result.single()
+            return bool(record and record.get("created"))
+
+    async def mark_state_pending(self, session_id: str, state_hash: str, *, crawl_session_id: str = "") -> bool:
+        async with self._driver.session() as session:
+            result = await session.run(
+                MARK_STATE_PENDING,
+                session_id=session_id,
+                crawl_session_id=crawl_session_id,
+                state_hash=state_hash,
+            )
+            record = await result.single()
+            return bool(record and int(record.get("count", 0)) > 0)
+
+    async def claim_next_pending_state(self, session_id: str, *, crawl_session_id: str = "") -> AbstractState | None:
+        async with self._driver.session() as session:
+            result = await session.run(
+                CLAIM_NEXT_PENDING_STATE,
+                session_id=session_id,
+                crawl_session_id=crawl_session_id,
+            )
+            record = await result.single()
+            if not record:
+                return None
+            return AbstractState(
+                state_hash=str(record.get("state_hash") or ""),
+                url=str(record.get("url") or ""),
+                title=str(record.get("title") or ""),
+                html="",
+            )
+
+    async def mark_state_explored(self, session_id: str, state_hash: str, *, crawl_session_id: str = "") -> None:
+        async with self._driver.session() as session:
+            await session.run(
+                MARK_STATE_EXPLORED,
+                session_id=session_id,
+                crawl_session_id=crawl_session_id,
+                state_hash=state_hash,
             )
 
     async def set_state_properties(self, session_id: str, state_hash: str, props: dict) -> None:
@@ -55,18 +119,40 @@ class GraphRepository:
                 props=self._normalize_props(props),
             )
 
-    async def add_transition(self, t: AbstractTransition) -> None:
+    async def add_transition(self, t: AbstractTransition) -> bool:
         props = {
             "action_type": t.action_type,
             "action_description": t.action_description,
+            "session_id": t.crawl_session_id,
             "locator_id": str(t.locator_id),
             "locator_value": t.locator_value,
             "action_value": t.action_value,
             "action_fingerprint": t.action_fingerprint,
+            "action_stable_key": t.action_stable_key,
         }
 
         async with self._driver.session() as session:
-            await session.run(
+            existing = await session.run(
+                FIND_EQUIVALENT_TRANSITION,
+                session_id=t.session_id,
+                source_hash=t.source_state_hash,
+                target_hash=t.target_state_hash,
+                action_stable_key=t.action_stable_key,
+                action_type=t.action_type,
+                action_value=t.action_value,
+                locator_value=t.locator_value,
+            )
+            existing_record = await existing.single()
+            if existing_record and existing_record.get("transition_id"):
+                await session.run(
+                    UPDATE_TRANSITION,
+                    session_id=t.session_id,
+                    transition_id=str(existing_record["transition_id"]),
+                    props=self._normalize_props(props),
+                )
+                return False
+
+            result = await session.run(
                 ADD_TRANSITION,
                 session_id=t.session_id,
                 source_hash=t.source_state_hash,
@@ -74,6 +160,185 @@ class GraphRepository:
                 transition_id=t.transition_id,
                 props=self._normalize_props(props),
             )
+            record = await result.single()
+            return bool(record and record.get("created"))
+
+    async def mark_action_attempted(
+        self,
+        session_id: str,
+        state_hash: str,
+        attempt_fingerprint: str,
+        *,
+        crawl_session_id: str = "",
+    ) -> bool:
+        async with self._driver.session() as session:
+            result = await session.run(
+                MARK_ACTION_ATTEMPTED,
+                session_id=session_id,
+                crawl_session_id=crawl_session_id,
+                state_hash=state_hash,
+                attempt_fingerprint=attempt_fingerprint,
+            )
+            record = await result.single()
+            return bool(record and record.get("created"))
+
+    async def try_increment_action_repeat(
+        self,
+        session_id: str,
+        *,
+        crawl_session_id: str = "",
+        scope: str,
+        action_key: str,
+        max_repeats: int,
+    ) -> bool:
+        if max_repeats <= 0:
+            return False
+        async with self._driver.session() as session:
+            result = await session.run(
+                TRY_INCREMENT_ACTION_REPEAT,
+                session_id=session_id,
+                crawl_session_id=crawl_session_id,
+                scope=scope,
+                action_key=action_key,
+                max_repeats=int(max_repeats),
+            )
+            record = await result.single()
+            return bool(record)
+
+    async def upsert_replay_info_if_better(
+        self,
+        session_id: str,
+        state_hash: str,
+        props: dict[str, Any],
+        score: list[Any],
+    ) -> bool:
+        score_values = list(score) + [999999, 999999, 999999, 999999, ""]
+        async with self._driver.session() as session:
+            result = await session.run(
+                UPSERT_REPLAY_INFO_IF_BETTER,
+                session_id=session_id,
+                state_hash=state_hash,
+                props=self._normalize_props(props),
+                score_self_checkpoint=int(score_values[0]),
+                score_action_count=int(score_values[1]),
+                score_fallback_count=int(score_values[2]),
+                score_kind_rank=int(score_values[3]),
+                score_checkpoint_url=str(score_values[4] or ""),
+            )
+            record = await result.single()
+            return bool(record and int(record.get("count", 0)) > 0)
+
+    async def get_replay_info(self, session_id: str, state_hash: str) -> dict[str, Any] | None:
+        async with self._driver.session() as session:
+            result = await session.run(
+                GET_REPLAY_INFO,
+                session_id=session_id,
+                state_hash=state_hash,
+            )
+            record = await result.single()
+            return record.data() if record else None
+
+    async def add_deferred_work(
+        self,
+        session_id: str,
+        *,
+        crawl_session_id: str = "",
+        work_id: str,
+        source_state_hash: str,
+        actions_json: str,
+        element_json: str,
+    ) -> None:
+        async with self._driver.session() as session:
+            await session.run(
+                ADD_DEFERRED_WORK,
+                session_id=session_id,
+                crawl_session_id=crawl_session_id,
+                work_id=work_id,
+                source_state_hash=source_state_hash,
+                actions_json=actions_json,
+                element_json=element_json,
+            )
+
+    async def claim_deferred_work(self, session_id: str, *, crawl_session_id: str = "") -> dict[str, Any] | None:
+        async with self._driver.session() as session:
+            result = await session.run(
+                CLAIM_DEFERRED_WORK,
+                session_id=session_id,
+                crawl_session_id=crawl_session_id,
+            )
+            record = await result.single()
+            return record.data() if record else None
+
+    async def mark_deferred_work_processed(self, session_id: str, work_id: str, *, crawl_session_id: str = "") -> None:
+        async with self._driver.session() as session:
+            await session.run(
+                MARK_DEFERRED_WORK_PROCESSED,
+                session_id=session_id,
+                crawl_session_id=crawl_session_id,
+                work_id=work_id,
+            )
+
+    async def upsert_semantic_profile(
+        self,
+        session_id: str,
+        state_hash: str,
+        payload: dict[str, Any],
+    ) -> None:
+        async with self._driver.session() as session:
+            await session.run(
+                UPSERT_SEMANTIC_PROFILE,
+                session_id=session_id,
+                state_hash=state_hash,
+                payload_json=stable_json_dumps(payload),
+            )
+
+    async def get_semantic_profile(self, session_id: str, state_hash: str) -> dict[str, Any] | None:
+        async with self._driver.session() as session:
+            result = await session.run(
+                GET_SEMANTIC_PROFILE,
+                session_id=session_id,
+                state_hash=state_hash,
+            )
+            record = await result.single()
+            if not record or not record.get("payload_json"):
+                return None
+            try:
+                return json.loads(record["payload_json"])
+            except Exception:
+                return None
+
+    async def iter_semantic_profiles(
+        self,
+        session_id: str,
+        *,
+        state_hash: str,
+        batch_size: int,
+    ):
+        skip = 0
+        while True:
+            async with self._driver.session() as session:
+                result = await session.run(
+                    ITER_SEMANTIC_PROFILES,
+                    session_id=session_id,
+                    state_hash=state_hash,
+                    skip=skip,
+                    limit=batch_size,
+                )
+                records = await result.fetch(batch_size)
+            if not records:
+                break
+            for record in records:
+                payload_json = record.get("payload_json")
+                if not payload_json:
+                    continue
+                try:
+                    payload = json.loads(payload_json)
+                except Exception:
+                    continue
+                yield payload
+            if len(records) < batch_size:
+                break
+            skip += batch_size
 
     async def get_state_graph(self, session_id: str) -> dict:
         async with self._driver.session() as session:
