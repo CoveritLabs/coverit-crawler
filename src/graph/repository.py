@@ -22,6 +22,7 @@ from src.graph.queries import (
     MARK_DEFERRED_WORK_PROCESSED,
     MARK_STATE_EXPLORED,
     MARK_STATE_PENDING,
+    SET_STATE_FRONTIER_PRIORITY,
     SET_STATE_PROPS,
     TRY_INCREMENT_ACTION_REPEAT,
     UPDATE_TRANSITION,
@@ -51,6 +52,27 @@ class GraphRepository:
     def _normalize_props(self, props: dict) -> dict:
         return {key: self._normalize_prop_value(value) for key, value in props.items()}
 
+    @staticmethod
+    def _frontier_priority_params(
+        *,
+        semantic_priority_penalty: float | None = None,
+        matched_state_hash: str = "",
+        confidence: float | None = None,
+        reason: str = "",
+        scores: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "semantic_priority_penalty": (
+                None
+                if semantic_priority_penalty is None
+                else float(semantic_priority_penalty)
+            ),
+            "semantic_duplicate_of": matched_state_hash or "",
+            "semantic_confidence": None if confidence is None else float(confidence),
+            "semantic_reason": reason or "",
+            "semantic_scores_json": stable_json_dumps(scores or {}) if scores else "",
+        }
+
     async def add_state(
         self,
         session_id: str,
@@ -58,6 +80,11 @@ class GraphRepository:
         *,
         enqueue: bool = True,
         crawl_session_id: str = "",
+        semantic_priority_penalty: float | None = None,
+        matched_state_hash: str = "",
+        confidence: float | None = None,
+        reason: str = "",
+        scores: dict[str, Any] | None = None,
     ) -> bool:
         async with self._driver.session() as session:
             result = await session.run(
@@ -69,17 +96,42 @@ class GraphRepository:
                 html=state.html,
                 enqueue=enqueue,
                 crawl_session_id=crawl_session_id,
+                **self._frontier_priority_params(
+                    semantic_priority_penalty=semantic_priority_penalty,
+                    matched_state_hash=matched_state_hash,
+                    confidence=confidence,
+                    reason=reason,
+                    scores=scores,
+                ),
             )
             record = await result.single()
             return bool(record and record.get("created"))
 
-    async def mark_state_pending(self, session_id: str, state_hash: str, *, crawl_session_id: str = "") -> bool:
+    async def mark_state_pending(
+        self,
+        session_id: str,
+        state_hash: str,
+        *,
+        crawl_session_id: str = "",
+        semantic_priority_penalty: float | None = None,
+        matched_state_hash: str = "",
+        confidence: float | None = None,
+        reason: str = "",
+        scores: dict[str, Any] | None = None,
+    ) -> bool:
         async with self._driver.session() as session:
             result = await session.run(
                 MARK_STATE_PENDING,
                 session_id=session_id,
                 crawl_session_id=crawl_session_id,
                 state_hash=state_hash,
+                **self._frontier_priority_params(
+                    semantic_priority_penalty=semantic_priority_penalty,
+                    matched_state_hash=matched_state_hash,
+                    confidence=confidence,
+                    reason=reason,
+                    scores=scores,
+                ),
             )
             record = await result.single()
             return bool(record and int(record.get("count", 0)) > 0)
@@ -109,6 +161,33 @@ class GraphRepository:
                 crawl_session_id=crawl_session_id,
                 state_hash=state_hash,
             )
+
+    async def set_state_frontier_priority(
+        self,
+        session_id: str,
+        state_hash: str,
+        *,
+        crawl_session_id: str = "",
+        semantic_priority_penalty: float = 0.0,
+        matched_state_hash: str = "",
+        confidence: float = 0.0,
+        reason: str = "",
+        scores: dict[str, Any] | None = None,
+    ) -> bool:
+        async with self._driver.session() as session:
+            result = await session.run(
+                SET_STATE_FRONTIER_PRIORITY,
+                session_id=session_id,
+                crawl_session_id=crawl_session_id,
+                state_hash=state_hash,
+                semantic_priority_penalty=float(semantic_priority_penalty),
+                matched_state_hash=matched_state_hash,
+                confidence=float(confidence),
+                reason=reason,
+                scores_json=stable_json_dumps(scores or {}),
+            )
+            record = await result.single()
+            return bool(record and int(record.get("count", 0)) > 0)
 
     async def set_state_properties(self, session_id: str, state_hash: str, props: dict) -> None:
         async with self._driver.session() as session:
@@ -313,13 +392,18 @@ class GraphRepository:
         *,
         state_hash: str,
         batch_size: int,
+        crawl_session_id: str = "",
+        frontier_statuses: list[str] | None = None,
     ):
+        statuses = frontier_statuses or ["exploring", "explored"]
         skip = 0
         while True:
             async with self._driver.session() as session:
                 result = await session.run(
                     ITER_SEMANTIC_PROFILES,
                     session_id=session_id,
+                    crawl_session_id=crawl_session_id,
+                    frontier_statuses=statuses,
                     state_hash=state_hash,
                     skip=skip,
                     limit=batch_size,

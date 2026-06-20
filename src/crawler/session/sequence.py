@@ -9,6 +9,7 @@ from src.crawler.fingerprints import (
     transition_fingerprint,
 )
 from src.crawler.replay import StateReplayInfo
+from src.crawler.semantic_engine import semantic_priority_penalty
 from src.crawler.session.sequence_builders import (
     sequence_description,
     sequence_digest,
@@ -99,7 +100,11 @@ class CrawlSessionSequenceMixin:
                 return None
 
             target_state = new_state
-            is_semantic_duplicate = False
+            priority_penalty: float | None = None
+            semantic_match_hash = ""
+            semantic_match_confidence: float | None = None
+            semantic_match_reason = ""
+            semantic_match_scores: dict[str, float] = {}
 
             if self._semantic_engine:
                 new_state_elements = await self.browser.get_interactable_elements()
@@ -109,44 +114,47 @@ class CrawlSessionSequenceMixin:
                 )
                 diagnostics = self._semantic_engine.explain_comparison(comparison)
                 logger.debug("State comparison diagnostics: %s", diagnostics)
-                if not comparison.is_novel and comparison.matched_state_hash:
+                if comparison.reason != "already_registered":
+                    priority_penalty = semantic_priority_penalty(comparison)
+                    semantic_match_hash = comparison.matched_state_hash or ""
+                    semantic_match_confidence = comparison.confidence
+                    semantic_match_reason = comparison.reason
+                    semantic_match_scores = comparison.scores
+                if (
+                    comparison.reason != "already_registered"
+                    and comparison.is_equivalent
+                    and comparison.matched_state_hash
+                ):
                     logger.info(
-                        "State %s is equivalent to %s (confidence %.3f). Recording transition to known state.",
+                        "State %s is equivalent to %s (confidence %.3f). Deprioritizing exploration.",
                         new_state.state_hash,
                         comparison.matched_state_hash,
                         comparison.confidence,
                     )
-                    target_state = AbstractState(
-                        state_hash=comparison.matched_state_hash,
-                        url=new_state.url,
-                        title=new_state.title,
-                        html=new_state.html,
-                        dom_snapshot=new_state.dom_snapshot,
-                        metadata=new_state.metadata,
-                    )
-                    is_semantic_duplicate = True
 
             info = self._build_replay_info(source_info, actions, reached_url=new_url)
 
             if not info.checkpoint_state_hash:
                 info.checkpoint_state_hash = new_state.state_hash
 
-            updated = False
-            if not is_semantic_duplicate:
-                await self.add_to_queue(new_state)
-                updated = await self.replayer.register(new_state.state_hash, info)
+            await self.add_to_queue(
+                new_state,
+                semantic_priority_penalty=priority_penalty,
+                matched_state_hash=semantic_match_hash,
+                confidence=semantic_match_confidence,
+                reason=semantic_match_reason,
+                scores=semantic_match_scores,
+            )
+            updated = await self.replayer.register(new_state.state_hash, info)
 
-                if updated:
-                    await self._persist_replay_artifacts(
-                        state_hash=new_state.state_hash,
-                        info=info,
-                        persist_storage_state=(info.checkpoint_state_hash == new_state.state_hash),
-                    )
+            if updated:
+                await self._persist_replay_artifacts(
+                    state_hash=new_state.state_hash,
+                    info=info,
+                    persist_storage_state=(info.checkpoint_state_hash == new_state.state_hash),
+                )
 
             await self.add_transition(self._build_transition(source, target_state, actions))
-
-            if is_semantic_duplicate:
-                await self.replayer.replay_to(source.state_hash)
 
             return target_state
 

@@ -31,17 +31,75 @@ class Neo4jGraphBuilder:
         *,
         enqueue: bool = True,
         crawl_session_id: str = "",
+        semantic_priority_penalty: float | None = None,
+        matched_state_hash: str = "",
+        confidence: float | None = None,
+        reason: str = "",
+        scores: dict | None = None,
     ) -> bool:
-        return await self.repo.add_state(session_id, state, enqueue=enqueue, crawl_session_id=crawl_session_id)
+        return await self.repo.add_state(
+            session_id,
+            state,
+            enqueue=enqueue,
+            crawl_session_id=crawl_session_id,
+            semantic_priority_penalty=semantic_priority_penalty,
+            matched_state_hash=matched_state_hash,
+            confidence=confidence,
+            reason=reason,
+            scores=scores,
+        )
 
-    async def mark_state_pending(self, session_id: str, state_hash: str, *, crawl_session_id: str = "") -> bool:
-        return await self.repo.mark_state_pending(session_id, state_hash, crawl_session_id=crawl_session_id)
+    async def mark_state_pending(
+        self,
+        session_id: str,
+        state_hash: str,
+        *,
+        crawl_session_id: str = "",
+        semantic_priority_penalty: float | None = None,
+        matched_state_hash: str = "",
+        confidence: float | None = None,
+        reason: str = "",
+        scores: dict | None = None,
+    ) -> bool:
+        return await self.repo.mark_state_pending(
+            session_id,
+            state_hash,
+            crawl_session_id=crawl_session_id,
+            semantic_priority_penalty=semantic_priority_penalty,
+            matched_state_hash=matched_state_hash,
+            confidence=confidence,
+            reason=reason,
+            scores=scores,
+        )
 
     async def claim_next_pending_state(self, session_id: str, *, crawl_session_id: str = "") -> AbstractState | None:
         return await self.repo.claim_next_pending_state(session_id, crawl_session_id=crawl_session_id)
 
     async def mark_state_explored(self, session_id: str, state_hash: str, *, crawl_session_id: str = "") -> None:
         await self.repo.mark_state_explored(session_id, state_hash, crawl_session_id=crawl_session_id)
+
+    async def set_state_frontier_priority(
+        self,
+        session_id: str,
+        state_hash: str,
+        *,
+        crawl_session_id: str = "",
+        semantic_priority_penalty: float = 0.0,
+        matched_state_hash: str = "",
+        confidence: float = 0.0,
+        reason: str = "",
+        scores: dict | None = None,
+    ) -> bool:
+        return await self.repo.set_state_frontier_priority(
+            session_id,
+            state_hash,
+            crawl_session_id=crawl_session_id,
+            semantic_priority_penalty=semantic_priority_penalty,
+            matched_state_hash=matched_state_hash,
+            confidence=confidence,
+            reason=reason,
+            scores=scores,
+        )
 
     async def set_state_properties(self, session_id: str, state_hash: str, props: dict) -> None:
         await self.repo.set_state_properties(session_id, state_hash, props)
@@ -118,8 +176,22 @@ class Neo4jGraphBuilder:
     async def get_semantic_profile(self, session_id: str, state_hash: str) -> dict | None:
         return await self.repo.get_semantic_profile(session_id, state_hash)
 
-    def iter_semantic_profiles(self, session_id: str, *, state_hash: str, batch_size: int):
-        return self.repo.iter_semantic_profiles(session_id, state_hash=state_hash, batch_size=batch_size)
+    def iter_semantic_profiles(
+        self,
+        session_id: str,
+        *,
+        state_hash: str,
+        batch_size: int,
+        crawl_session_id: str = "",
+        frontier_statuses: list[str] | None = None,
+    ):
+        return self.repo.iter_semantic_profiles(
+            session_id,
+            state_hash=state_hash,
+            batch_size=batch_size,
+            crawl_session_id=crawl_session_id,
+            frontier_statuses=frontier_statuses,
+        )
 
     async def get_state_graph(self, session_id: str) -> dict:
         return await self.repo.get_state_graph(session_id)

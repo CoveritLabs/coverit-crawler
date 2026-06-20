@@ -89,6 +89,7 @@ class CrawlSessionBase:
             max_bank_size=self._settings.SEMANTIC_MAX_BANK_SIZE,
             graph_store=self.graph_builder,
             session_id=self.session_id,
+            crawl_session_id=self.crawl_session_id,
         )
         self.executor = EventExecutor(
             self.browser,
@@ -122,13 +123,28 @@ class CrawlSessionBase:
         await self.browser.stop()
         logger.info("Crawl session completed")
 
-    async def add_to_queue(self, state: AbstractState, *, enqueue: bool = True) -> bool:
+    async def add_to_queue(
+        self,
+        state: AbstractState,
+        *,
+        enqueue: bool = True,
+        semantic_priority_penalty: float | None = None,
+        matched_state_hash: str = "",
+        confidence: float | None = None,
+        reason: str = "",
+        scores: dict | None = None,
+    ) -> bool:
         await self._wait_permission()
         created = await self.graph_builder.add_state(
             self.session_id,
             state,
             enqueue=enqueue,
             crawl_session_id=self.crawl_session_id,
+            semantic_priority_penalty=semantic_priority_penalty,
+            matched_state_hash=matched_state_hash,
+            confidence=confidence,
+            reason=reason,
+            scores=scores,
         )
         state.html = ""
         if created:

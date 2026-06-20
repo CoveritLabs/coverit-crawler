@@ -33,12 +33,31 @@ FOREACH (_ IN CASE WHEN $enqueue AND $crawl_session_id <> '' THEN [1] ELSE [] EN
     ON CREATE SET
         f.created_at = timestamp(),
         f.status = 'pending',
-        f.order = timestamp()
+        f.order = timestamp(),
+        f.semantic_priority_penalty = coalesce($semantic_priority_penalty, 0.0)
     ON MATCH SET f.status = CASE
         WHEN coalesce(f.status, 'seen') = 'explored' THEN f.status
         ELSE 'pending'
     END
     SET f.order = coalesce(f.order, timestamp()),
+        f.semantic_priority_penalty = coalesce(
+            $semantic_priority_penalty,
+            f.semantic_priority_penalty,
+            0.0
+        ),
+        f.semantic_duplicate_of = CASE
+            WHEN $semantic_duplicate_of = '' THEN f.semantic_duplicate_of
+            ELSE $semantic_duplicate_of
+        END,
+        f.semantic_confidence = coalesce($semantic_confidence, f.semantic_confidence),
+        f.semantic_reason = CASE
+            WHEN $semantic_reason = '' THEN f.semantic_reason
+            ELSE $semantic_reason
+        END,
+        f.semantic_scores_json = CASE
+            WHEN $semantic_scores_json = '' THEN f.semantic_scores_json
+            ELSE $semantic_scores_json
+        END,
         f.updated_at = timestamp()
 )
 RETURN created
@@ -48,7 +67,8 @@ CLAIM_NEXT_PENDING_STATE = """
 MATCH (f:StateFrontier {graph_id: $session_id, crawl_session_id: $crawl_session_id, status: 'pending'})
 MATCH (s:State {graph_id: $session_id, state_hash: f.state_hash})
 WITH f, s, properties(s) AS props
-ORDER BY coalesce(f.order, props.first_seen, timestamp()) ASC
+ORDER BY coalesce(f.semantic_priority_penalty, 0.0) ASC,
+         coalesce(f.order, props.first_seen, timestamp()) ASC
 LIMIT 1
 SET f.status = 'exploring',
     f.claimed_at = timestamp(),
@@ -65,11 +85,31 @@ MERGE (f:StateFrontier {
     crawl_session_id: $crawl_session_id,
     state_hash: $state_hash
 })
-ON CREATE SET f.created_at = timestamp()
+ON CREATE SET
+    f.created_at = timestamp(),
+    f.semantic_priority_penalty = coalesce($semantic_priority_penalty, 0.0)
 WITH f
 WHERE coalesce(f.status, 'seen') <> 'explored'
 SET f.status = 'pending',
     f.order = coalesce(f.order, timestamp()),
+    f.semantic_priority_penalty = coalesce(
+        $semantic_priority_penalty,
+        f.semantic_priority_penalty,
+        0.0
+    ),
+    f.semantic_duplicate_of = CASE
+        WHEN $semantic_duplicate_of = '' THEN f.semantic_duplicate_of
+        ELSE $semantic_duplicate_of
+    END,
+    f.semantic_confidence = coalesce($semantic_confidence, f.semantic_confidence),
+    f.semantic_reason = CASE
+        WHEN $semantic_reason = '' THEN f.semantic_reason
+        ELSE $semantic_reason
+    END,
+    f.semantic_scores_json = CASE
+        WHEN $semantic_scores_json = '' THEN f.semantic_scores_json
+        ELSE $semantic_scores_json
+    END,
     f.updated_at = timestamp()
 RETURN count(f) AS count
 """
@@ -83,6 +123,30 @@ MERGE (f:StateFrontier {
 SET f.status = 'explored',
     f.explored_at = timestamp(),
     f.updated_at = timestamp()
+"""
+
+SET_STATE_FRONTIER_PRIORITY = """
+MATCH (s:State {graph_id: $session_id, state_hash: $state_hash})
+MERGE (f:StateFrontier {
+    graph_id: $session_id,
+    crawl_session_id: $crawl_session_id,
+    state_hash: $state_hash
+})
+ON CREATE SET
+    f.created_at = timestamp(),
+    f.status = 'pending',
+    f.order = timestamp()
+SET f.status = CASE
+        WHEN coalesce(f.status, 'seen') = 'explored' THEN f.status
+        ELSE 'pending'
+    END,
+    f.semantic_priority_penalty = coalesce($semantic_priority_penalty, 0.0),
+    f.semantic_duplicate_of = $matched_state_hash,
+    f.semantic_confidence = $confidence,
+    f.semantic_reason = $reason,
+    f.semantic_scores_json = $scores_json,
+    f.updated_at = timestamp()
+RETURN count(f) AS count
 """
 
 SET_STATE_PROPS = """
@@ -234,7 +298,13 @@ RETURN properties(p).payload_json AS payload_json
 
 ITER_SEMANTIC_PROFILES = """
 MATCH (p:SemanticProfile {graph_id: $session_id})
+MATCH (f:StateFrontier {
+    graph_id: $session_id,
+    crawl_session_id: $crawl_session_id,
+    state_hash: p.state_hash
+})
 WHERE p.state_hash <> $state_hash
+  AND f.status IN $frontier_statuses
 RETURN properties(p).payload_json AS payload_json
 ORDER BY coalesce(properties(p).created_at, 0) DESC
 SKIP $skip
