@@ -55,5 +55,22 @@ async def generate_flows_for_session(ctx: dict, session_id: str, graph_id: str |
             session_id,
             len(all_flows),
         )
+        new_flows = []
+        for to_state, flows in all_flows.items():
+            new_flows.extend(
+                [
+                    {
+                        "checkpoint_hash": flow.checkpoint_hash,
+                        "transition_ids": flow.transition_refs,
+                    }
+                    for flow in flows
+                ]
+            )
+        payload = {"session_id": session_id, "flows": new_flows}
+        await ctx["redis"].enqueue_job(
+            "task_generate_bdd",
+            payload=payload,
+            _queue_name="docgen:queue"
+        )
     finally:
         await client.close()

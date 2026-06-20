@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 
 from arq.connections import RedisSettings
 from arq.worker import run_worker
+from typing import Any
 
 from src import config
 from src.db import create_engine, create_sessionmaker
@@ -30,11 +31,11 @@ logging.getLogger("neo4j").addFilter(_neo4j_notification_filter)
 logging.getLogger("neo4j.notifications").addFilter(_neo4j_notification_filter)
 
 
-def arq_job_serializer(value: dict) -> bytes:
-    return json.dumps(value, separators=(",", ":")).encode("utf-8")
+def arq_job_serializer(value: Any) -> bytes:
+    return json.dumps(value, separators=(",", ":"), default=str).encode("utf-8")
 
 
-def arq_job_deserializer(value: bytes) -> dict:
+def arq_job_deserializer(value: bytes) -> Any:
     return json.loads(value.decode("utf-8"))
 
 
