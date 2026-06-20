@@ -25,6 +25,9 @@ HIGH_SIMILARITY_EQUIVALENCE_MINIMUMS = {
     "count_similarity": 0.95,
 }
 
+SEMANTIC_PRIORITY_NOVEL = 0.0
+SEMANTIC_PRIORITY_EQUIVALENT = 1.0
+
 
 @dataclass(frozen=True, eq=False)
 class StateSemanticProfile:
@@ -78,6 +81,18 @@ class StateComparisonResult:
     confidence: float
     scores: dict[str, float]
     reason: str
+
+
+def semantic_priority_penalty(result: StateComparisonResult) -> float:
+    if result.reason in {"semantic_engine_unavailable", "comparison_error"}:
+        return SEMANTIC_PRIORITY_NOVEL
+    if result.reason == "already_registered":
+        return SEMANTIC_PRIORITY_NOVEL
+    if result.is_equivalent:
+        return SEMANTIC_PRIORITY_EQUIVALENT
+    if not result.matched_state_hash:
+        return SEMANTIC_PRIORITY_NOVEL
+    return float(np.clip(result.confidence, 0.0, SEMANTIC_PRIORITY_EQUIVALENT))
 
 
 class StateProfiler:
@@ -232,6 +247,7 @@ class StateComparisonBank:
         max_size: int,
         graph_store: Any | None = None,
         session_id: str | None = None,
+        crawl_session_id: str | None = None,
         batch_size: int = 100,
     ):
         self._profiler = profiler
@@ -241,6 +257,7 @@ class StateComparisonBank:
         self._max_size = max(1, max_size)
         self._graph_store = graph_store
         self._session_id = session_id
+        self._crawl_session_id = crawl_session_id or session_id
         self._batch_size = max(1, int(batch_size))
         self._profiles: OrderedDict[str, StateSemanticProfile] = OrderedDict()
 
@@ -323,6 +340,8 @@ class StateComparisonBank:
             session_id,
             state_hash=state_hash,
             batch_size=self._batch_size,
+            crawl_session_id=self._crawl_session_id or "",
+            frontier_statuses=["exploring", "explored"],
         ):
             known = StateSemanticProfile.from_payload(payload)
             if known is None:
@@ -349,6 +368,11 @@ class StateComparisonBank:
                 "confident_equivalence"
                 if confident_equivalence
                 else "high_similarity_equivalence"
+            )
+            await graph_store.upsert_semantic_profile(
+                session_id,
+                candidate.state_hash,
+                candidate.to_payload(),
             )
             return StateComparisonResult(
                 state_hash,
@@ -418,6 +442,7 @@ class StateComparisonBank:
                 if confident_equivalence
                 else "high_similarity_equivalence"
             )
+            self._store_profile(candidate)
             return StateComparisonResult(
                 state_hash,
                 False,
@@ -490,10 +515,7 @@ class StateComparisonBank:
         confidence: float = 0.0,
         scores: dict[str, float] | None = None,
     ) -> StateComparisonResult:
-        self._profiles[profile.state_hash] = profile
-        self._profiles.move_to_end(profile.state_hash)
-        while len(self._profiles) > self._max_size:
-            self._profiles.popitem(last=False)
+        self._store_profile(profile)
 
         return StateComparisonResult(
             profile.state_hash,
@@ -504,6 +526,12 @@ class StateComparisonBank:
             scores or {},
             reason,
         )
+
+    def _store_profile(self, profile: StateSemanticProfile) -> None:
+        self._profiles[profile.state_hash] = profile
+        self._profiles.move_to_end(profile.state_hash)
+        while len(self._profiles) > self._max_size:
+            self._profiles.popitem(last=False)
 
 
 def pair_features(

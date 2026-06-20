@@ -40,6 +40,18 @@ FOR (f:StateFrontier)
 REQUIRE (f.graph_id, f.crawl_session_id, f.state_hash) IS UNIQUE
 """
 
+FRONTIER_CLAIM_INDEX = """
+CREATE INDEX frontier_claim IF NOT EXISTS
+FOR (f:StateFrontier)
+ON (
+    f.graph_id,
+    f.crawl_session_id,
+    f.status,
+    f.semantic_priority_penalty,
+    f.order
+)
+"""
+
 ACTION_ATTEMPT_SESSION_CONSTRAINT = """
 CREATE CONSTRAINT action_attempt_session_unique IF NOT EXISTS
 FOR (a:ActionAttempt)
@@ -70,6 +82,7 @@ async def init_schema(driver: AsyncDriver) -> None:
         await session.run(DROP_LEGACY_DEFERRED_WORK_CONSTRAINT)
         await session.run(SEMANTIC_PROFILE_CONSTRAINT)
         await session.run(FRONTIER_CONSTRAINT)
+        await session.run(FRONTIER_CLAIM_INDEX)
         await session.run(ACTION_ATTEMPT_SESSION_CONSTRAINT)
         await session.run(REPEAT_COUNTER_SESSION_CONSTRAINT)
         await session.run(DEFERRED_WORK_SESSION_CONSTRAINT)

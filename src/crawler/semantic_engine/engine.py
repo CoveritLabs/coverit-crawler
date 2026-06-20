@@ -34,6 +34,7 @@ class SemanticEngine:
         comparison_bank: StateComparisonBank | None = None,
         graph_store: Any | None = None,
         session_id: str | None = None,
+        crawl_session_id: str | None = None,
     ):
         self.extractor = DOMFeatureExtractor()
         self._enabled = enabled
@@ -49,6 +50,7 @@ class SemanticEngine:
                 max_bank_size=max_bank_size,
                 graph_store=graph_store,
                 session_id=session_id,
+                crawl_session_id=crawl_session_id,
             )
 
         self.resolver = InputResolver(
@@ -152,6 +154,7 @@ class SemanticEngine:
         max_bank_size: int,
         graph_store: Any | None = None,
         session_id: str | None = None,
+        crawl_session_id: str | None = None,
     ) -> None:
         try:
             topic_bundle = load_cached_model_bundle(
@@ -200,6 +203,7 @@ class SemanticEngine:
                 max_size=max_bank_size,
                 graph_store=graph_store,
                 session_id=session_id,
+                crawl_session_id=crawl_session_id,
             )
         except (ArtifactError, KeyError, TypeError, ValueError) as exc:
             self._load_error = str(exc)

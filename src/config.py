@@ -94,7 +94,7 @@ class Config:
                 "SEMANTIC_ARTIFACT_DIR",
                 os.path.join(os.path.dirname(__file__), "models", "semantic"),
             ),
-            USE_SEMANTIC_DIVERSITY=_env_bool("USE_SEMANTIC_DIVERSITY", "true"),
+            USE_SEMANTIC_DIVERSITY=_env_bool("USE_SEMANTIC_DIVERSITY", "false"),
             DATABASE_URL=os.getenv("DATABASE_URL") or None,
             REDIS_URL=os.getenv("REDIS_URL") or None,
             ARQ_QUEUE_NAME=os.getenv("CRAWL_ARQ_QUEUE_NAME", "arq:queue"),
