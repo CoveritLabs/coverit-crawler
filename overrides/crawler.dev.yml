@@ -1,0 +1,23 @@
+# Copyright (c) 2026 CoverIt Labs. All Rights Reserved.
+# Proprietary and confidential. Unauthorized use is strictly prohibited.
+# See LICENSE file in the project root for full license information.
+
+# Modular override for crawler-worker development from the local crawler repo.
+
+services:
+  crawler-worker:
+    image: coverit-crawler-dev-local
+    build:
+      context: ${CRAWLER_DIR}
+      dockerfile: Dockerfile
+    pull_policy: build
+    volumes:
+      - ${CRAWLER_DIR}/src:/app/src
+      - ${CRAWLER_DIR}/scripts:/app/scripts
+      - ${CRAWLER_DIR}/pyproject.toml:/app/pyproject.toml
+      - ${CRAWLER_DIR}/requirements.runtime.txt:/app/requirements.runtime.txt
+      - ${CRAWLER_DIR}/README.md:/app/README.md
+
+secrets:
+  npm_token:
+    environment: GITHUB_TOKEN
