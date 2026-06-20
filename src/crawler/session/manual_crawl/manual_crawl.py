@@ -1,35 +1,75 @@
 import asyncio
+import sys
 import logging
+from typing import List
+
 from src.crawler.session.base import CrawlSessionBase
 from src.crawler.session.manual_crawl.recording_mapper import map_steps_to_actions
 from src.crawler.session.sequence import CrawlSessionSequenceMixin
+from src.models.graph import AbstractState
+from src.workers.flow_worker import push_flows_to_api
 
 logger = logging.getLogger(__name__)
 
-
-with open("./recording.js", "r", encoding="utf-8") as script_file:
+with open("src/crawler/session/manual_crawl/action_recorder.js", "r", encoding="utf-8") as script_file:
     RECORDING_JS = script_file.read()
 
 class ManualCrawlSession(CrawlSessionBase, CrawlSessionSequenceMixin):
-    async def run_crawl(self) -> None:
+    async def run_crawl(self):
+        self._recording_state = False
+        self._exit_session = False
+        self._recorded_transitions = []
+        self._recorded_steps = []
+        self._recorded_storage_state_json = []
+        self._recorded_states: List[AbstractState] = []
+        self._recording_start_idx = 0
+
+        async def listen_for_input():
+            loop = asyncio.get_event_loop()
+            print("\n--- Manual Crawl Controls ---")
+            print("Type 's' + Enter to Start recording for manual flow")
+            print("Type 'q' + Enter to stop recording and end session \n")
+            print("Type 'b' + Enter to Build Bug Graph\n")
+            while not self._exit_session:
+                cmd = await loop.run_in_executor(None, sys.stdin.readline)
+                cmd = cmd.strip().lower()
+                if cmd == 's':
+                    if(self._recording_state):
+                        print("Already recording")
+                    else:
+                        print("Recording started")
+                        self._recording_state = True
+                elif cmd == 'q':
+                    self._exit_session = True
+                    break
+                elif cmd == 'b':
+                    print("Building bug graph from recorded session...")
+                    await self.build_bug_graph()
+                    print("Bug graph build complete.")
+                    
+        listener_task = asyncio.create_task(listen_for_input())
+
         try:
             self.headless = False
             self.browser.headless = False
+            
             await self.initialize()
-            self._recorded_steps = []
             context = self.browser._require_context()
+            
             await context.expose_function("__reportStep", lambda step: self._recorded_steps.append(step))
             await context.add_init_script(RECORDING_JS)
 
             await self.browser.navigate(self.base_url)
             await self.browser.wait_for_settle()
-            current_state = await self.browser.capture_state()
-            await self.add_to_queue(current_state)
             
-            print(f"\nManual Crawl Session live on {self.base_url}. Press Ctrl+C to close.\n")
+            current_state = await self.browser.capture_state()
+            self._recorded_states.append(current_state)
+            self._recorded_storage_state_json.append(await self.browser.export_storage_state())
 
-            while True:
-                await asyncio.sleep(0.2)
+            print(f"\nManual Crawl Session live on {self.base_url}.\n")
+
+            while not self._exit_session:
+                await asyncio.sleep(0.1)
 
                 if not self.browser.context or len(self.browser.context.pages) == 0:
                     break
@@ -37,20 +77,69 @@ class ManualCrawlSession(CrawlSessionBase, CrawlSessionSequenceMixin):
                 new_hash = await self.browser.get_state_hash()
 
                 if new_hash != current_state.state_hash:
-                    self.graph_builder.set_state_properties(self.session_id, new_hash, props)
                     steps_to_process = list(self._recorded_steps)
                     self._recorded_steps.clear()
-                    new_state = await self.browser.capture_state()
-                    actions = map_steps_to_actions(steps_to_process, fallback_url=new_state.url)
-                    await self.add_to_queue(new_state)
-                    transition = self._build_transition(current_state, new_state, actions)
-                    await self.add_transition(transition)
 
+                    new_state = await self.browser.capture_state()
+
+                    if(new_state.url != current_state.url and not self._recording_state):
+                        self._recording_start_idx = max(0, len(self._recorded_states) - 1)
+                    
+                    self._recorded_storage_state_json.append(await self.browser.export_storage_state())
+                    
+                    actions = map_steps_to_actions(steps_to_process, fallback_url=current_state.url)
+                    self._recorded_states.append(new_state)
+                    
+                    transition = self._build_transition(current_state, new_state, actions)
+                    self._recorded_transitions.append(transition)
+                    
                     logger.info(f"Generated Transition: {transition.action_description}")
                     current_state = new_state
 
         except KeyboardInterrupt:
-            print("\nClosing manual session and committing graph structure...")
+            print("\nManual session interrupted by user.")
         finally:
+            listener_task.cancel()
+            print("Committing graph structure and cleaning up...")
+            await self.build_recorded_graph()
             await self.cleanup()
-    
+        
+
+    async def build_recorded_graph(self) -> None:
+        if not self._recorded_states:
+            return
+            
+        start_idx = self._recording_start_idx if self._recording_start_idx is not None else 0
+        
+        await self._build_graph_starting_from(start_idx, is_bug_graph=False)
+
+
+    async def build_bug_graph(self) -> None:
+        await self._build_graph_starting_from(0, is_bug_graph=True)
+
+
+    async def _build_graph_starting_from(self, start_idx: int, is_bug_graph: bool = False) -> dict:
+        if not self._recorded_states or start_idx >= len(self._recorded_states):
+            return {"final_state_hash": None,"transitions": [] }
+
+        last_state_hash = self._recorded_states[-1].state_hash
+        transition_refs = [t.transition_id for t in self._recorded_transitions[start_idx:]]    
+        
+        for i in range(start_idx, len(self._recorded_states)):
+            await self.add_to_queue(self._recorded_states[i])
+            await self.graph_builder.set_state_properties(
+                self.session_id,
+                self._recorded_states[i].state_hash,
+                {"checkpoint_storage_state_json": self._recorded_storage_state_json[i]},
+            )
+            
+        for i in range(start_idx, len(self._recorded_transitions)):
+            await self.add_transition(self._recorded_transitions[i])
+
+        # await push_flows_to_api(
+        #     self.session_id,
+        #     {
+        #         "final_state_hash": last_state_hash,
+        #         "transition_refs": transition_refs
+        #     }
+        # )
