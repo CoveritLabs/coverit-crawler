@@ -98,7 +98,6 @@ class GraphRepository:
     async def get_lightweight_flow_graph(self, session_id: str) -> dict:
         async with self._driver.session() as session:
             result = await session.run(GET_LIGHTWEIGHT_FLOW_GRAPH, session_id=session_id)
-            result = await session.run(GET_LIGHTWEIGHT_FLOW_GRAPH, session_id=session_id)
             record = await result.single()
             if not record:
                 return {"states": [], "transitions": []}

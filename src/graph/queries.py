@@ -55,8 +55,7 @@ OPTIONAL MATCH (s)-[t:TRANSITION]->(target:State)
 RETURN
     collect(DISTINCT {
         state_hash: s.state_hash,
-        is_checkpoint: s.is_checkpoint,
-        checkpoint_kind: s.checkpoint_kind
+        first_seen: s.first_seen
     }) AS states,
     collect(DISTINCT {
         source_hash: s.state_hash,
