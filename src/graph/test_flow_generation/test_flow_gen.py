@@ -49,7 +49,6 @@ async def find_all_flows(
         convergence_threshold=convergence_threshold,
         min_num_of_tf=min_num_of_tf,
         min_num_of_states_per_tf=min_num_of_states_per_tf,
-        max_num_of_states_per_tf=max_num_of_states_per_tf,
     )
 
     logger.info(
