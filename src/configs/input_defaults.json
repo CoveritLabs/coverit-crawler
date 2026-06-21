@@ -1,8 +1,8 @@
 {
     "field_patterns": {
         "email": "test@example.com",
-        "password": "Test1234!",
-        "username": "testuser",
+        "password": "secret_sauce",
+        "username": "standard_user",
         "firstname": "Test",
         "lastname": "User",
         "fullname": "Test User",

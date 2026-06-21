@@ -235,6 +235,10 @@ class CrawlSessionBase:
         logger.info(f"Initial state: {initial_state.state_hash} at {initial_state.url}")
 
         if login_actions:
+            await self._mark_login_state(
+                initial_state,
+                reason="initial_login_form_submission",
+            )
             reached = await self._execute_action_sequence(initial_state, info, login_actions)
             if not reached:
                 await self.graph_builder.mark_state_pending(
@@ -265,9 +269,28 @@ class CrawlSessionBase:
 
     def _select_login_form(self, forms: list[dict]) -> dict | None:
         for form in forms:
-            fields = form.get("fields", [])
-            if any(str(f.get("type", "")).lower() == "password" for f in fields):
-                submit = form.get("submit")
-                if submit and submit.get("selector"):
-                    return form
+            if self._is_login_form(form):
+                return form
         return None
+
+    def _is_login_form(self, form: dict) -> bool:
+        fields = form.get("fields", [])
+        has_password = any(str(f.get("type", "")).lower() == "password" for f in fields)
+        submit = form.get("submit")
+
+        return bool(has_password and submit and submit.get("selector"))
+
+    async def _mark_login_state(self, state: AbstractState, *, reason: str) -> None:
+        state.metadata = dict(state.metadata or {})
+        state.metadata["is_login_state"] = True
+        state.metadata["login_detection_reason"] = reason
+
+        await self.graph_builder.set_state_properties(
+            self.session_id,
+            state.state_hash,
+            {
+                "is_login_state": True,
+                "state_kind": "login",
+                "login_detection_reason": reason,
+            },
+        )

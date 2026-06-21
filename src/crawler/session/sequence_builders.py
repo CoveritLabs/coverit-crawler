@@ -9,30 +9,26 @@ def sequence_description(actions: List[CrawlAction]) -> str:
         return ""
 
     if len(actions) == 1:
-        return actions[0].description
+        return _action_description_with_value(actions[0])
 
     parts = []
-    for a in actions[:6]:
-        d = str(a.description or a.action_type).strip()
-        if d:
-            parts.append(d)
+    for action in actions:
+        description = _action_description_with_value(action)
+        if description:
+            parts.append(description)
 
-    suffix = ""
-    if len(actions) > 6:
-        suffix = f" … (+{len(actions) - 6} more)"
-
-    return f"Sequence ({len(actions)}): " + " -> ".join(parts) + suffix
+    return f"Sequence ({len(actions)}): " + " -> ".join(parts)
 
 
 def sequence_value_for_graph(actions: List[CrawlAction]) -> str:
     payload = [
         {
-            "t": a.action_type,
-            "s": a.selector,
-            "v": _safe_value(a),
-            "d": a.description,
+            "t": action.action_type,
+            "s": action.selector,
+            "v": _saved_value(action),
+            "d": _action_description_with_value(action),
         }
-        for a in actions
+        for action in actions
     ]
     return stable_json_dumps(payload)
 
@@ -40,13 +36,26 @@ def sequence_value_for_graph(actions: List[CrawlAction]) -> str:
 def sequence_digest(actions: List[CrawlAction]) -> str:
     import hashlib
 
-    payload = [{"t": a.action_type, "s": a.selector, "v": a.value} for a in actions]
+    payload = [
+        {"t": action.action_type, "s": action.selector, "v": action.value}
+        for action in actions
+    ]
     raw = stable_json_dumps(payload)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _safe_value(action: CrawlAction) -> str:
-    if action.action_type in ("navigate", "select", "press","type"):
+def _saved_value(action: CrawlAction) -> str:
+    if action.action_type in ("navigate", "select", "press", "type"):
         return str(action.value or "")
 
     return ""
+
+
+def _action_description_with_value(action: CrawlAction) -> str:
+    description = str(action.description or action.action_type).strip()
+    value = _saved_value(action)
+
+    if not value:
+        return description
+
+    return f"{description} value={value}"
