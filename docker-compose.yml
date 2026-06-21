@@ -30,3 +30,36 @@ services:
         condition: service_healthy
       neo4j:
         condition: service_healthy
+
+  flows-worker:
+    image: ghcr.io/coveritlabs/coverit-crawler:${CRAWLER_TAG:-dev}
+    build:
+      context: ${CRAWLER_DIR:-.}
+      dockerfile: Dockerfile
+    pull_policy: always
+    container_name: coverit-flows
+    
+    command: ["python", "-m", "arq", "src.workers.main_flows.FlowsWorkerSettings"]
+    
+    env_file:
+      - path: ${CRAWLER_DIR:-.}/.env
+        required: false
+    environment:
+      DATABASE_URL: ${CRAWLER_DATABASE_URL:-postgresql://postgres:postgres@db:5432/coverit?schema=public}
+      REDIS_URL: ${CRAWLER_REDIS_URL:-redis://redis:6379/0}
+      NEO4J_URI: ${CRAWLER_NEO4J_URI:-bolt://neo4j:7687}
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-password}
+      COVERIT_API_INTERNAL_URL: ${CRAWLER_API_INTERNAL_URL:-http://api:3000/api/v1}
+    init: true
+    shm_size: "1gb"
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
