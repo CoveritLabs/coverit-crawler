@@ -357,10 +357,8 @@ OPTIONAL MATCH (s)-[t:TRANSITION {graph_id: $session_id}]->(target:State)
 WITH properties(s) AS s_props, properties(t) AS t_props, properties(target) AS target_props
 RETURN
     collect(DISTINCT {
-        state_hash: s_props.state_hash,
-        is_checkpoint: s_props.is_checkpoint,
-        checkpoint_kind: s_props.checkpoint_kind,
-        first_seen: s_props.first_seen
+        state_hash: s.state_hash,
+        first_seen: s.first_seen
     }) AS states,
     collect(DISTINCT {
         source_hash: s_props.state_hash,
