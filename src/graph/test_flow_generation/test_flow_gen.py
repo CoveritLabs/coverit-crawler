@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 
-from graph import build_flow_graph
-from stage1_preproccessing import TestFlow, generate_candidate_tfs, merge_short_tfs
+from graph import build_flow_graph,TestFlow
+from stage1_preproccessing import CandidateTFGenerator
 from stage2_selecting_best_tf import select_tfs
 
 logger = logging.getLogger(__name__)
@@ -26,19 +26,22 @@ async def find_all_flows(
         logger.warning("No root found for session %s", session_id)
         return []
 
-    candidates = generate_candidate_tfs(
+    candidate_generator = CandidateTFGenerator(
         graph,
         root_hash,
         max_num_of_states_per_tf=max_num_of_states_per_tf,
     )
-    if not candidates:
-        logger.warning("Stage 1 produced no candidate TFs for session %s", session_id)
-        return []
 
-    candidates = merge_short_tfs(
-        candidates,
+    candidate_generator.generate_candidate_tfs()
+    
+
+    candidate_generator.merge_short_tfs(
         min_num_of_states_per_tf=min_num_of_states_per_tf,
     )
+
+    candidate_generator.append_checkpoints_to_tfs()
+
+    candidates=candidate_generator.get_candidate_tfs()
 
     selected = select_tfs(
         candidates,

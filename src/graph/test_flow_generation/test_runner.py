@@ -13,14 +13,14 @@ class MockGraphRepo:
         self.raw_data = {}
 
     async def get_lightweight_flow_graph(self, session_id: str) -> dict:
-        states = [{"state_hash": "node_0", "first_seen": 0}]
+        states = [{"state_hash": "node_0", "first_seen": 0, "is_checkpoint": True}]
         transitions = []
         t_id = 1
         
         # 1. Guarantee every node is reachable by connecting it to a previous node
         for i in range(1, self.target_nodes):
             node_name = f"node_{i}"
-            states.append({"state_hash": node_name, "first_seen": i})
+            states.append({"state_hash": node_name, "first_seen": i, "is_checkpoint": random.random() < 0.3})
             
             src = f"node_{random.randint(0, i-1)}"
             transitions.append({
@@ -60,7 +60,7 @@ def print_graphviz_dot(raw: dict):
     print("}\n-------------------------------------------------------------------------")
 
 async def main():
-    repo = MockGraphRepo(target_nodes=10000, max_branches=5)
+    repo = MockGraphRepo(target_nodes=1000, max_branches=5)
     
    
     start_time = time.time()
