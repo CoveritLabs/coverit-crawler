@@ -118,8 +118,7 @@ class CrawlSessionExploreMixin:
 
         if is_login_form:
             await self._mark_login_state(
-                current,
-                reason="explored_login_form_submission",
+                current
             )
 
         await self._execute_action_sequence(current, current_info, actions)

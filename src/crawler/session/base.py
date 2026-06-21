@@ -237,7 +237,6 @@ class CrawlSessionBase:
         if login_actions:
             await self._mark_login_state(
                 initial_state,
-                reason="initial_login_form_submission",
             )
             reached = await self._execute_action_sequence(initial_state, info, login_actions)
             if not reached:
@@ -280,17 +279,14 @@ class CrawlSessionBase:
 
         return bool(has_password and submit and submit.get("selector"))
 
-    async def _mark_login_state(self, state: AbstractState, *, reason: str) -> None:
+    async def _mark_login_state(self, state: AbstractState) -> None:
         state.metadata = dict(state.metadata or {})
         state.metadata["is_login_state"] = True
-        state.metadata["login_detection_reason"] = reason
 
         await self.graph_builder.set_state_properties(
             self.session_id,
             state.state_hash,
             {
                 "is_login_state": True,
-                "state_kind": "login",
-                "login_detection_reason": reason,
             },
         )
