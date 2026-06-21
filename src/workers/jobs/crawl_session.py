@@ -13,7 +13,6 @@ from src.db.repositories.crawl_sessions import (
 )
 from src.db.services.crawl_sessions import ensure_started_or_skip_aborted
 from src.models import CrawlJob
-from src.workers.flow_worker import generate_flows_for_session
 
 logger = logging.getLogger(__name__)
 
@@ -149,8 +148,6 @@ async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
             status = await get_session_status(s, session_id)
 
         state_count, transition_count = await crawl_task
-        if status in {"RUNNING", "PAUSED"}:
-            await generate_flows_for_session(ctx, session_id, graph_id)
 
         async with db() as s:
             updated = await mark_completed_if_running(s, session_id, state_count, transition_count)

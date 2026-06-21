@@ -45,8 +45,6 @@ class CrawlSessionExploreMixin:
                 )
                 diagnostics = self._semantic_engine.explain_comparison(comparison)
                 logger.debug("State %s: %s", current.state_hash, diagnostics)
-                if not comparison.is_novel and comparison.reason != "already_registered":
-                    return
 
             await self._explore_forms(current, current_info)
             await self._explore_elements(current, current_info, state_elements)

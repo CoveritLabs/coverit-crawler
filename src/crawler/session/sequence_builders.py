@@ -46,16 +46,7 @@ def sequence_digest(actions: List[CrawlAction]) -> str:
 
 
 def _safe_value(action: CrawlAction) -> str:
-    if action.action_type == "type":
-        meta = action.metadata or {}
-        field_type = str(meta.get("type", "") or "").lower()
-        field_name = str(meta.get("field", "") or "").lower()
-
-        if field_type == "password" or "pass" in field_name:
-            return "<redacted>"
-        return "<typed>"
-
-    if action.action_type in ("navigate", "select", "press"):
+    if action.action_type in ("navigate", "select", "press","type"):
         return str(action.value or "")
 
     return ""
