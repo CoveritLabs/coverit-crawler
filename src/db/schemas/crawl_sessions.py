@@ -19,6 +19,7 @@ class CrawlSession(Base):
         UUID(as_uuid=False),
         ForeignKey("target_application_versions.id"),
     )
+    creator_user_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
 
     status: Mapped[CrawlStatus | None] = mapped_column(crawl_status_enum)
 

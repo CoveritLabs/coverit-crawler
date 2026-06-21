@@ -81,6 +81,27 @@ async def mark_failed_if_running(
     return (result.rowcount or 0) == 1
 
 
+async def mark_aborted_if_active(session: AsyncSession, session_id: str) -> bool:
+    stmt = (
+        update(CrawlSession)
+        .where(
+            CrawlSession.crawl_session_id == session_id,
+            CrawlSession.status.in_(
+                [
+                    CrawlStatus.NEW,
+                    CrawlStatus.QUEUED,
+                    CrawlStatus.RUNNING,
+                    CrawlStatus.PAUSED,
+                ]
+            ),
+        )
+        .values(status=CrawlStatus.ABORTED, finished_at=func.now())
+    )
+    result = await session.execute(stmt)
+    await session.commit()
+    return (result.rowcount or 0) == 1
+
+
 async def mark_finished_at_if_aborted(session: AsyncSession, session_id: str) -> None:
     stmt = (
         update(CrawlSession)
