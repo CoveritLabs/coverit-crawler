@@ -44,6 +44,8 @@ def main() -> int:
         "redis://127.0.0.1:",
     )
     env["COVERIT_API_INTERNAL_URL"] = require(env, "COVERIT_API_INTERNAL_URL")
+    env["NEO4J_URI"] = env.get("NEO4J_URI") or env.get("NEO4J_URL") or "bolt://localhost:7687"
+    env["NEO4J_USER"] = env.get("NEO4J_USER") or env.get("NEO4J_USERNAME") or "neo4j"
 
     print(describe_url("DATABASE_URL", env["DATABASE_URL"]), flush=True)
     print(describe_url("REDIS_URL", env["REDIS_URL"]), flush=True)

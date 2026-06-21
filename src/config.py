@@ -64,8 +64,8 @@ class Config:
     @classmethod
     def from_env(cls) -> Config:
         return cls(
-            NEO4J_URI=os.getenv("NEO4J_URI", "bolt://localhost:7687"),
-            NEO4J_USER=os.getenv("NEO4J_USER", "neo4j"),
+            NEO4J_URI=os.getenv("NEO4J_URI") or os.getenv("NEO4J_URL", "bolt://localhost:7687"),
+            NEO4J_USER=os.getenv("NEO4J_USER") or os.getenv("NEO4J_USERNAME", "neo4j"),
             NEO4J_PASSWORD=os.getenv("NEO4J_PASSWORD", "password"),
             HEADLESS=_env_bool("HEADLESS", "true"),
             TIMEOUT_MS=_env_int("TIMEOUT_MS", 3000),

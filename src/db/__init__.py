@@ -15,6 +15,7 @@ __all__ = [
     "fetch_job_inputs",
     "fetch_graph_id",
     "get_session_status",
+    "mark_aborted_if_active",
     "mark_completed_if_running",
     "mark_failed_if_running",
     "mark_finished_at_if_aborted",
@@ -38,6 +39,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "get_session_status": ("src.db.repositories.crawl_sessions", "get_session_status"),
     "mark_completed_if_running": ("src.db.repositories.crawl_sessions", "mark_completed_if_running"),
     "mark_failed_if_running": ("src.db.repositories.crawl_sessions", "mark_failed_if_running"),
+    "mark_aborted_if_active": ("src.db.repositories.crawl_sessions", "mark_aborted_if_active"),
     "mark_finished_at_if_aborted": ("src.db.repositories.crawl_sessions", "mark_finished_at_if_aborted"),
     "mark_queued_running": ("src.db.repositories.crawl_sessions", "mark_queued_running"),
     "TestFlow": ("src.db.schemas.test_flow", "TestFlow"),
@@ -71,6 +73,7 @@ if TYPE_CHECKING:
         get_session_status,
         mark_completed_if_running,
         mark_failed_if_running,
+        mark_aborted_if_active,
         mark_finished_at_if_aborted,
         mark_queued_running,
     )
