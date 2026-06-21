@@ -53,11 +53,32 @@ def main() -> int:
     if not python.exists():
         python = Path(sys.executable)
 
-    return subprocess.call(
+    print("Starting CRAWLER worker...", flush=True)
+    crawler_process = subprocess.Popen(
         [str(python), "-m", "arq", "src.workers.main.WorkerSettings"],
         cwd=ROOT,
         env=env,
     )
+
+    print("Starting FLOWS worker...", flush=True)
+    flows_process = subprocess.Popen(
+        [str(python), "-m", "arq", "src.workers.main_flows.FlowsWorkerSettings"],
+        cwd=ROOT,
+        env=env,
+    )
+
+    try:
+        crawler_process.wait()
+        flows_process.wait()
+    except KeyboardInterrupt:
+        print("\nShutting down workers...", flush=True)
+        crawler_process.terminate()
+        flows_process.terminate()
+        crawler_process.wait()
+        flows_process.wait()
+        print("Both workers shut down cleanly.", flush=True)
+
+    return 0
 
 
 if __name__ == "__main__":

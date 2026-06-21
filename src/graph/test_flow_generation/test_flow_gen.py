@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import logging
-
+from typing import Any
 from graph import build_flow_graph,TestFlow
 from stage1_preproccessing import CandidateTFGenerator
 from stage2_selecting_best_tf import select_tfs
-
+from src.db.enums import TestFlowType
 logger = logging.getLogger(__name__)
 
 
@@ -17,14 +17,14 @@ async def find_all_flows(
     max_num_of_states_per_tf: int = 20,
     convergence_threshold: float | None = None,
     min_num_of_tf: int | None = None,
-) -> list[TestFlow]:
+) ->dict[str, Any]:
     """Fetch raw graph from repository, generate candidate flows, and select optimal subset."""
     raw = await graph_repo.get_lightweight_flow_graph(session_id)
 
     graph, root_hash = build_flow_graph(raw)
     if root_hash is None:
         logger.warning("No root found for session %s", session_id)
-        return []
+        return {}
 
     candidate_generator = CandidateTFGenerator(
         graph,
@@ -57,4 +57,21 @@ async def find_all_flows(
         len(candidates),
         len(selected),
     )
-    return selected
+    return get_payload(selected,session_id)
+
+def get_payload(selected_tfs: list[TestFlow], session_id: str) -> dict[str, Any]:
+    """
+    Transforms the selected internal TF objects into the dictionary 
+    payload shape required by process_incoming_flow_payload.
+    """
+    return {
+        "session_id": session_id,
+        "flows": [
+            {
+                "checkpoint_hash": tf.node_path[0],
+                "transition_ids": tf.transition_ids,
+                "flow_type": TestFlowType.COVERAGE.value,
+            }
+            for tf in selected_tfs
+        ]
+    }
