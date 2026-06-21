@@ -19,6 +19,9 @@ __all__ = [
     "mark_failed_if_running",
     "mark_finished_at_if_aborted",
     "mark_queued_running",
+    "TestFlow",
+    "create_test_flow",
+    "fetch_test_flow_details",
 ]
 
 _EXPORTS: dict[str, tuple[str, str]] = {
@@ -37,6 +40,9 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "mark_failed_if_running": ("src.db.repositories.crawl_sessions", "mark_failed_if_running"),
     "mark_finished_at_if_aborted": ("src.db.repositories.crawl_sessions", "mark_finished_at_if_aborted"),
     "mark_queued_running": ("src.db.repositories.crawl_sessions", "mark_queued_running"),
+    "TestFlow": ("src.db.schemas.test_flow", "TestFlow"),
+    "create_test_flow": ("src.db.repositories.test_flows", "create_test_flow"),
+    "fetch_test_flow_details": ("src.db.repositories.test_flows", "fetch_test_flow_details"),
 }
 
 
@@ -71,3 +77,5 @@ if TYPE_CHECKING:
     from src.db.schemas.crawl_sessions import CrawlSession
     from src.db.schemas.target_application import TargetApplication
     from src.db.schemas.target_application_version import TargetApplicationVersion
+    from src.db.schemas.test_flow import TestFlow
+    from src.db.repositories.test_flows import (create_test_flow, fetch_test_flow_details)

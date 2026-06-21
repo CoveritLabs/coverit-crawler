@@ -7,7 +7,6 @@ from src.crawler.session.base import CrawlSessionBase
 from src.crawler.session.manual_crawl.recording_mapper import map_steps_to_actions
 from src.crawler.session.sequence import CrawlSessionSequenceMixin
 from src.models.graph import AbstractState
-from src.workers.flow_worker import push_flows_to_api
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +117,7 @@ class ManualCrawlSession(CrawlSessionBase, CrawlSessionSequenceMixin):
         await self._build_graph_starting_from(0, is_bug_graph=True)
 
 
-    async def _build_graph_starting_from(self, start_idx: int, is_bug_graph: bool = False) -> dict:
+    async def _build_graph_starting_from(self, start_idx: int, is_bug_graph: bool = False):
         if not self._recorded_states or start_idx >= len(self._recorded_states):
             return {"final_state_hash": None,"transitions": [] }
 
@@ -135,11 +134,3 @@ class ManualCrawlSession(CrawlSessionBase, CrawlSessionSequenceMixin):
             
         for i in range(start_idx, len(self._recorded_transitions)):
             await self.add_transition(self._recorded_transitions[i])
-
-        # await push_flows_to_api(
-        #     self.session_id,
-        #     {
-        #         "final_state_hash": last_state_hash,
-        #         "transition_refs": transition_refs
-        #     }
-        # )

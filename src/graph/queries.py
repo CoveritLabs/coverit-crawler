@@ -352,18 +352,18 @@ DETACH DELETE n
 """
 
 GET_LIGHTWEIGHT_FLOW_GRAPH = """
-MATCH (s:State {graph_id: $session_id})
-OPTIONAL MATCH (s)-[t:TRANSITION {graph_id: $session_id}]->(target:State)
-WITH properties(s) AS s_props, properties(t) AS t_props, properties(target) AS target_props
+MATCH (s:State {session_id: $session_id})
+OPTIONAL MATCH (s)-[t:TRANSITION]->(target:State)
 RETURN
     collect(DISTINCT {
         state_hash: s.state_hash,
-        first_seen: s.first_seen
+        first_seen: s.first_seen,
+        is_checkpoint: s.is_checkpoint
     }) AS states,
     collect(DISTINCT {
-        source_hash: s_props.state_hash,
-        target_hash: target_props.state_hash,
-        transition_id: t_props.transition_id
+        source_hash: s.state_hash,
+        target_hash: target.state_hash,
+        transition_id: t.transition_id
     }) AS transitions
 """
 
