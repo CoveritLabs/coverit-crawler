@@ -69,7 +69,8 @@ async def main():
         session_id="mock_session_123",
         min_num_of_states_per_tf=4,
         max_num_of_states_per_tf=20,
-        convergence_threshold=0.0
+        min_num_of_tf=800,
+        convergence_threshold=0.1,
     )
     end_time = time.time()
     print(f"\nTime taken to find all flows: {end_time - start_time:.4f} seconds")
