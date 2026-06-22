@@ -398,3 +398,31 @@ RETURN checkpoint_url,
          checkpoint_url: checkpoint_url
        }) AS transitions
 """
+
+VERIFY_BDD_FLOW = """
+MATCH (checkpoint:State {
+    session_id: $crawl_session_id,
+    state_hash: $checkpoint_hash
+})
+WITH checkpoint,
+     $transition_refs AS refs
+UNWIND range(0, size(refs) - 1) AS idx
+WITH checkpoint,
+     idx,
+     refs[idx] AS ref
+MATCH (source:State {session_id: $crawl_session_id})
+      -[transition:TRANSITION {
+          session_id: $crawl_session_id,
+          transition_id: ref
+      }]->
+      (target:State {session_id: $crawl_session_id})
+RETURN checkpoint.state_hash AS checkpoint_hash,
+       collect({
+         order: idx,
+         transition_id: transition.transition_id,
+         source_state_hash: source.state_hash,
+         target_state_hash: target.state_hash,
+         locator_value: transition.locator_value,
+         action_value: transition.action_value
+       }) AS transitions
+"""
