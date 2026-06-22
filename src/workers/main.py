@@ -2,17 +2,16 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any
 from urllib.parse import urlparse
 
 from arq.connections import RedisSettings
 from arq.worker import run_worker
-from typing import Any
 
 from src import config
 from src.db import create_engine, create_sessionmaker
 from src.workers.crawler_worker import CrawlerWorker
 from src.workers.jobs.crawl_session import crawl_session
-from src.workers.jobs.manual_record_session import manual_record_session
 
 logging.getLogger("neo4j").setLevel(logging.WARNING)
 logging.getLogger("neo4j.notifications").setLevel(logging.WARNING)

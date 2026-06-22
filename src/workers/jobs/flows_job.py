@@ -51,9 +51,28 @@ async def run_find_all_flows(
         if not flows:
             flows = {"flows": []}
         flows["session_id"] = session_id
+        flows["graph_id"] = graph_id
+
+        flow_count = len(flows.get("flows", []))
+        if flow_count == 0:
+            logger.warning(
+                "No flows selected for crawl session %s; skipping BDD generation",
+                session_id,
+            )
+            return {
+                "status": "no_flows",
+                "session_id": session_id,
+                "graph_id": graph_id,
+                "flow_count": 0,
+            }
 
         async with db() as s:
-            await process_incoming_flow_payload(s, flows)
+            flow_ids = await process_incoming_flow_payload(s, flows)
+
+        for flow_id, flow in zip(flow_ids, flows.get("flows", []), strict=False):
+            flow["flow_id"] = flow_id
+
+        flows["flow_ids"] = flow_ids
 
         await ctx["redis"].enqueue_job(
             "task_generate_bdd",
@@ -61,7 +80,6 @@ async def run_find_all_flows(
             _queue_name="docgen:queue",
         )
 
-        flow_count = len(flows.get("flows", []))
         logger.info("Generated %d flows for crawl session %s", flow_count, session_id)
         return {
             "status": "completed",

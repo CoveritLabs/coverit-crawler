@@ -60,6 +60,10 @@ class Config:
     ARQ_JOB_EXPIRES_MS: int
     CRAWLER_MAX_JOBS: int
     CRAWLER_JOB_TIMEOUT_SECONDS: int
+    MANUAL_ARQ_QUEUE_NAME: str
+    MANUAL_CRAWLER_MAX_JOBS: int
+    MANUAL_CRAWLER_JOB_TIMEOUT_SECONDS: int
+    MANUAL_SESSION_IDLE_TTL_SECONDS: int
 
     @classmethod
     def from_env(cls) -> Config:
@@ -101,6 +105,10 @@ class Config:
             ARQ_JOB_EXPIRES_MS=_env_int("CRAWL_ARQ_EXPIRES_MS", 86400000),
             CRAWLER_MAX_JOBS=_env_int("CRAWLER_MAX_JOBS", 10),
             CRAWLER_JOB_TIMEOUT_SECONDS=_env_int("CRAWLER_JOB_TIMEOUT_SECONDS", 1800),
+            MANUAL_ARQ_QUEUE_NAME=os.getenv("MANUAL_ARQ_QUEUE_NAME", "arq:manual-recordings"),
+            MANUAL_CRAWLER_MAX_JOBS=_env_int("MANUAL_CRAWLER_MAX_JOBS", 2),
+            MANUAL_CRAWLER_JOB_TIMEOUT_SECONDS=_env_int("MANUAL_CRAWLER_JOB_TIMEOUT_SECONDS", 7200),
+            MANUAL_SESSION_IDLE_TTL_SECONDS=_env_int("MANUAL_SESSION_IDLE_TTL_SECONDS", 600),
         )
 
 

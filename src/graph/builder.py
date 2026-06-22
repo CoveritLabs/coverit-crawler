@@ -212,3 +212,15 @@ class Neo4jGraphBuilder:
         transition_refs: list[str],
     ):
         return await self.repo.get_data_from_flow_query(session_id, checkpoint_hash, transition_refs)
+
+    async def verify_bdd_flow(
+        self,
+        crawl_session_id: str,
+        checkpoint_hash: str,
+        transition_refs: list[str],
+    ) -> bool:
+        return await self.repo.verify_bdd_flow(
+            crawl_session_id,
+            checkpoint_hash,
+            transition_refs,
+        )

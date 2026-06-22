@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sys
 import logging
 from typing import List
@@ -12,6 +13,25 @@ logger = logging.getLogger(__name__)
 
 with open("src/crawler/session/manual_crawl/action_recorder.js", "r", encoding="utf-8") as script_file:
     RECORDING_JS = script_file.read()
+
+
+def _action_value_is_labelable(value: str) -> bool:
+    try:
+        actions = json.loads(value or "")
+    except Exception:
+        return False
+    if not isinstance(actions, list) or not actions:
+        return False
+    return all(
+        isinstance(action, dict) and bool(str(action.get("s") or "").strip())
+        for action in actions
+    )
+
+
+def _transition_is_labelable(transition) -> bool:
+    return bool(str(transition.locator_value or "").strip()) and _action_value_is_labelable(
+        transition.action_value
+    )
 
 class ManualCrawlSession(CrawlSessionBase, CrawlSessionSequenceMixin):
     async def run_crawl(self):
@@ -86,10 +106,20 @@ class ManualCrawlSession(CrawlSessionBase, CrawlSessionSequenceMixin):
                     
                     self._recorded_storage_state_json.append(await self.browser.export_storage_state())
                     
-                    actions = map_steps_to_actions(steps_to_process, fallback_url=current_state.url)
+                    actions = [
+                        action
+                        for action in map_steps_to_actions(steps_to_process, fallback_url=current_state.url)
+                        if str(action.selector or "").strip()
+                    ]
                     self._recorded_states.append(new_state)
+                    if not actions:
+                        current_state = new_state
+                        continue
                     
                     transition = self._build_transition(current_state, new_state, actions)
+                    if not _transition_is_labelable(transition):
+                        current_state = new_state
+                        continue
                     self._recorded_transitions.append(transition)
                     
                     logger.info(f"Generated Transition: {transition.action_description}")
@@ -122,7 +152,11 @@ class ManualCrawlSession(CrawlSessionBase, CrawlSessionSequenceMixin):
             return {"final_state_hash": None,"transitions": [] }
 
         last_state_hash = self._recorded_states[-1].state_hash
-        transition_refs = [t.transition_id for t in self._recorded_transitions[start_idx:]]    
+        transition_refs = [
+            t.transition_id
+            for t in self._recorded_transitions[start_idx:]
+            if _transition_is_labelable(t)
+        ]    
         
         for i in range(start_idx, len(self._recorded_states)):
             await self.add_to_queue(self._recorded_states[i])
@@ -133,4 +167,6 @@ class ManualCrawlSession(CrawlSessionBase, CrawlSessionSequenceMixin):
             )
             
         for i in range(start_idx, len(self._recorded_transitions)):
-            await self.add_transition(self._recorded_transitions[i])
+            transition = self._recorded_transitions[i]
+            if _transition_is_labelable(transition):
+                await self.add_transition(transition)

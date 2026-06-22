@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-
 from src.db.enums import TestFlowType
 from src.graph.test_flow_generation.graph import TestFlow, build_flow_graph
 from src.graph.test_flow_generation.stage1_preproccessing import CandidateTFGenerator

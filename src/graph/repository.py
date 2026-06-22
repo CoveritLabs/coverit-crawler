@@ -28,6 +28,7 @@ from src.graph.queries import (
     UPDATE_TRANSITION,
     UPSERT_REPLAY_INFO_IF_BETTER,
     UPSERT_SEMANTIC_PROFILE,
+    VERIFY_BDD_FLOW,
 )
 from src.models import AbstractState, AbstractTransition
 from src.utils.serialization import stable_json_dumps
@@ -48,6 +49,35 @@ class GraphRepository:
             return stable_json_dumps(value)
 
         return stable_json_dumps(value)
+
+    @staticmethod
+    def _action_value_is_labelable(value: Any) -> bool:
+        if isinstance(value, str):
+            if not value.strip():
+                return False
+            try:
+                actions = json.loads(value)
+            except Exception:
+                return False
+        else:
+            actions = value
+
+        if not isinstance(actions, list) or not actions:
+            return False
+
+        for action in actions:
+            if not isinstance(action, dict):
+                return False
+            if not str(action.get("s") or "").strip():
+                return False
+
+        return True
+
+    @classmethod
+    def _transition_is_labelable(cls, transition: dict[str, Any]) -> bool:
+        if not str(transition.get("locator_value") or "").strip():
+            return False
+        return cls._action_value_is_labelable(transition.get("action_value"))
 
     def _normalize_props(self, props: dict) -> dict:
         return {key: self._normalize_prop_value(value) for key, value in props.items()}
@@ -471,3 +501,42 @@ class GraphRepository:
             checkpoint_storage_state_json = record.get("checkpoint_storage_state_json")
             transitions = sorted(record.get("transitions", []), key=lambda item: item.get("order", 0))
             return checkpoint_url, checkpoint_storage_state_json, transitions
+
+    async def verify_bdd_flow(
+        self,
+        crawl_session_id: str,
+        checkpoint_hash: str,
+        transition_refs: list[str],
+    ) -> bool:
+        if not transition_refs:
+            return False
+
+        async with self._driver.session() as session:
+            result = await session.run(
+                VERIFY_BDD_FLOW,
+                crawl_session_id=crawl_session_id,
+                checkpoint_hash=checkpoint_hash,
+                transition_refs=transition_refs,
+            )
+            record = await result.single()
+            if not record:
+                return False
+
+        transitions = sorted(
+            record.get("transitions", []),
+            key=lambda item: int(item.get("order", 0)),
+        )
+        if len(transitions) != len(transition_refs):
+            return False
+
+        expected_source_hash = checkpoint_hash
+        for index, transition in enumerate(transitions):
+            if transition.get("transition_id") != transition_refs[index]:
+                return False
+            if transition.get("source_state_hash") != expected_source_hash:
+                return False
+            if not self._transition_is_labelable(transition):
+                return False
+            expected_source_hash = str(transition.get("target_state_hash") or "")
+
+        return True

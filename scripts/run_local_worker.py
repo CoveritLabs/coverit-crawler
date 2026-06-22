@@ -63,6 +63,13 @@ def main() -> int:
         env=env,
     )
 
+    print("Starting MANUAL worker...", flush=True)
+    manual_process = subprocess.Popen(
+        [str(python), "-m", "arq", "src.workers.main_manual.ManualWorkerSettings"],
+        cwd=ROOT,
+        env=env,
+    )
+
     print("Starting FLOWS worker...", flush=True)
     flows_process = subprocess.Popen(
         [str(python), "-m", "arq", "src.workers.main_flows.FlowsWorkerSettings"],
@@ -72,14 +79,17 @@ def main() -> int:
 
     try:
         crawler_process.wait()
+        manual_process.wait()
         flows_process.wait()
     except KeyboardInterrupt:
         print("\nShutting down workers...", flush=True)
         crawler_process.terminate()
+        manual_process.terminate()
         flows_process.terminate()
         crawler_process.wait()
+        manual_process.wait()
         flows_process.wait()
-        print("Both workers shut down cleanly.", flush=True)
+        print("All workers shut down cleanly.", flush=True)
 
     return 0
 

@@ -19,7 +19,7 @@ async def create_test_flow(
     checkpoint_hash: str,
     transition_refs: list[str],
     flow_type: TestFlowType | str,
-):
+) -> str:
     stmt = select(CrawlSession.app_version_id).where(
         CrawlSession.crawl_session_id == session_id
     )
@@ -45,6 +45,7 @@ async def create_test_flow(
 
     session.add(new_flow)
     await session.commit()
+    return new_flow_id
 
 
 async def create_test_flows_batch(
@@ -86,6 +87,7 @@ async def create_test_flows_batch(
 
     session.add_all(new_flows_instances)
     await session.commit()
+    return new_flow_ids
 
 
 async def process_incoming_flow_payload(
@@ -109,7 +111,7 @@ async def process_incoming_flow_payload(
             }
         )
 
-    await create_test_flows_batch(
+    return await create_test_flows_batch(
         session=session, session_id=session_id, flows_data=mapped_flows_data
     )
 
