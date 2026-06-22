@@ -51,9 +51,15 @@ async def run_find_all_flows(
         if not flows:
             flows = {"flows": []}
         flows["session_id"] = session_id
+        flows["graph_id"] = graph_id
 
         async with db() as s:
-            await process_incoming_flow_payload(s, flows)
+            flow_ids = await process_incoming_flow_payload(s, flows)
+
+        for flow_id, flow in zip(flow_ids, flows.get("flows", []), strict=False):
+            flow["flow_id"] = flow_id
+
+        flows["flow_ids"] = flow_ids
 
         await ctx["redis"].enqueue_job(
             "task_generate_bdd",
