@@ -67,7 +67,7 @@ class Config:
             NEO4J_URI=os.getenv("NEO4J_URI", "bolt://localhost:7687"),
             NEO4J_USER=os.getenv("NEO4J_USER", "neo4j"),
             NEO4J_PASSWORD=os.getenv("NEO4J_PASSWORD", "password"),
-            HEADLESS=_env_bool("HEADLESS", "false"),
+            HEADLESS=_env_bool("HEADLESS", "true"),
             TIMEOUT_MS=_env_int("TIMEOUT_MS", 3000),
             MAX_STATES=_env_int("MAX_STATES", 1000),
             MAX_TRANSITIONS=_env_int("MAX_TRANSITIONS", 5000),

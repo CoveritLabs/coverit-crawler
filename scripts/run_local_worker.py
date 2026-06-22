@@ -48,6 +48,7 @@ def main() -> int:
     print(describe_url("DATABASE_URL", env["DATABASE_URL"]), flush=True)
     print(describe_url("REDIS_URL", env["REDIS_URL"]), flush=True)
     print(describe_url("NEO4J_URI", require(env, "NEO4J_URI")), flush=True)
+    print(describe_url("COVERIT_API_INTERNAL_URL", env["COVERIT_API_INTERNAL_URL"]), flush=True)
 
     python = ROOT / ".venv" / "Scripts" / "python.exe"
     if not python.exists():

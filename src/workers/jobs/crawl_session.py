@@ -13,6 +13,7 @@ from src.db.repositories.crawl_sessions import (
 )
 from src.db.services.crawl_sessions import ensure_started_or_skip_aborted
 from src.models import CrawlJob
+from src.workers.flow_worker import generate_flows_for_session
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,10 @@ def _timeout_ms(config_json: dict[str, Any], crawler_settings: dict[str, Any]) -
     if seconds is None:
         return None
     return int(seconds) * 1000
+
+
+def _input_defaults(config_json: dict[str, Any]) -> Any:
+    return _pick(config_json, "inputDefaults", "input_defaults")
 
 
 def _build_payload_from_db(config_json: dict[str, Any], base_url: str, session_id: str, graph_id: str) -> dict[str, Any]:
@@ -60,11 +65,7 @@ def _build_payload_from_db(config_json: dict[str, Any], base_url: str, session_i
         "page_load_state": _pick(crawler_settings, "page_load_state", "pageLoadState"),
         "click_non_http_links": _pick(crawler_settings, "click_non_http_links", "clickNonHttpLinks"),
         "defer_destructive_actions": _pick(crawler_settings, "defer_destructive_actions", "deferDestructiveActions"),
-        "use_semantic_diversity": (
-            _pick(crawler_settings, "use_semantic_diversity", "useSemanticDiversity")
-            if _pick(crawler_settings, "use_semantic_diversity", "useSemanticDiversity") is not None
-            else _pick(config_json, "enable_semantic_decisions", "enableSemanticDecisions")
-        ),
+        "use_semantic_diversity": _pick(crawler_settings, "use_semantic_diversity", "useSemanticDiversity"),
         "semantic_diversity_threshold": _pick(crawler_settings, "semantic_diversity_threshold", "semanticDiversityThreshold"),
         "semantic_uncertainty_margin": _pick(crawler_settings, "semantic_uncertainty_margin", "semanticUncertaintyMargin"),
         "semantic_max_bank_size": _pick(crawler_settings, "semantic_max_bank_size", "semanticMaxBankSize"),
@@ -81,8 +82,13 @@ def _build_payload_from_db(config_json: dict[str, Any], base_url: str, session_i
         "session_id": session_id,
         "graph_id": graph_id,
         "settings": settings,
-        "input_defaults": config_json.get("inputDefaults"),
+        "input_defaults": _input_defaults(config_json),
     }
+
+
+def _should_generate_test_flows(config_json: dict[str, Any]) -> bool:
+    value = _pick(config_json, "generateTestFlows", "generate_test_flows")
+    return value is not False
 
 
 async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
@@ -119,6 +125,7 @@ async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
             config_json, base_url, graph_id = await fetch_job_inputs(s, session_id)
 
         payload = _build_payload_from_db(config_json, base_url, session_id, graph_id)
+        generate_test_flows = _should_generate_test_flows(config_json)
         job = CrawlJob.from_dict(payload, worker._settings)
 
         crawl_task = asyncio.create_task(worker.process(job, run_permission=run_permission))
@@ -149,6 +156,10 @@ async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
 
         state_count, transition_count = await crawl_task
 
+        flow_generation_result: dict[str, Any] | None = None
+        if generate_test_flows:
+            flow_generation_result = await generate_flows_for_session(ctx, session_id)
+
         async with db() as s:
             updated = await mark_completed_if_running(s, session_id, state_count, transition_count)
             if not updated:
@@ -160,6 +171,7 @@ async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
             "session_id": session_id,
             "state_count": state_count,
             "transition_count": transition_count,
+            "flows": flow_generation_result,
         }
 
     except asyncio.CancelledError:
