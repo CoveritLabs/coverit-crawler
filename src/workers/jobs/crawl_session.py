@@ -12,10 +12,19 @@ from src.db.repositories.crawl_sessions import (
     mark_finished_at_if_aborted,
 )
 from src.db.services.crawl_sessions import ensure_started_or_skip_aborted
+from src.graph.test_flow_generation.stage2_selecting_best_tf import MAX_TF_TAKEN
 from src.models import CrawlJob
+from src.utils.coercion import coerce_float, coerce_int
 from src.workers.jobs.flows_job import run_find_all_flows
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_TEST_FLOW_GENERATION_CONFIG = {
+    "coverage_percentage": 100.0,
+    "num_of_tf": 1,
+    "num_of_states": 20,
+    "min_num_of_states_per_tf": 3,
+}
 
 
 def _pick(source: dict[str, Any], *keys: str) -> Any:
@@ -33,6 +42,61 @@ def _timeout_ms(config_json: dict[str, Any], crawler_settings: dict[str, Any]) -
     if seconds is None:
         return None
     return int(seconds) * 1000
+
+
+def _input_defaults(config_json: dict[str, Any]) -> dict[str, Any] | None:
+    raw = _pick(config_json, "inputDefaults", "input_defaults")
+    if not isinstance(raw, dict):
+        return None
+
+    field_patterns = _pick(raw, "field_patterns", "fieldPatterns")
+    type_fallbacks = _pick(raw, "type_fallbacks", "typeFallbacks")
+
+    return {
+        "field_patterns": field_patterns if isinstance(field_patterns, dict) else {},
+        "type_fallbacks": type_fallbacks if isinstance(type_fallbacks, dict) else {},
+    }
+
+
+def _should_generate_test_flows(config_json: dict[str, Any]) -> bool:
+    value = _pick(config_json, "generateTestFlows", "generate_test_flows")
+    return value is not False
+
+
+def _test_flow_generation_config(config_json: dict[str, Any]) -> dict[str, Any]:
+    value = _pick(config_json, "testFlowGeneration", "test_flow_generation")
+    return value if isinstance(value, dict) else {}
+
+
+def _flow_generation_kwargs(config_json: dict[str, Any]) -> dict[str, Any]:
+    generation = _test_flow_generation_config(config_json)
+
+    min_states = coerce_int(
+        _pick(generation, "min_num_of_states_per_tf", "minNumOfStatesPerTf"),
+        DEFAULT_TEST_FLOW_GENERATION_CONFIG["min_num_of_states_per_tf"],
+    )
+    max_states = coerce_int(
+        _pick(generation, "num_of_states", "numOfStates"),
+        DEFAULT_TEST_FLOW_GENERATION_CONFIG["num_of_states"],
+    )
+    min_flows = coerce_int(
+        _pick(generation, "num_of_tf", "numOfTf"),
+        DEFAULT_TEST_FLOW_GENERATION_CONFIG["num_of_tf"],
+    )
+    coverage_percentage = coerce_float(
+        _pick(generation, "coverage_percentage", "coveragePercentage"),
+        DEFAULT_TEST_FLOW_GENERATION_CONFIG["coverage_percentage"],
+    )
+
+    max_states = max(1, max_states)
+    min_states = min(max_states, max(1, min_states))
+
+    return {
+        "min_num_of_states_per_tf": min_states,
+        "max_num_of_states_per_tf": max_states,
+        "min_num_of_tf": min(MAX_TF_TAKEN, max(1, min_flows)),
+        "convergence_threshold": min(100.0, max(0.0, coverage_percentage)) / 100,
+    }
 
 
 def _build_payload_from_db(config_json: dict[str, Any], base_url: str, session_id: str, graph_id: str) -> dict[str, Any]:
@@ -61,11 +125,7 @@ def _build_payload_from_db(config_json: dict[str, Any], base_url: str, session_i
         "page_load_state": _pick(crawler_settings, "page_load_state", "pageLoadState"),
         "click_non_http_links": _pick(crawler_settings, "click_non_http_links", "clickNonHttpLinks"),
         "defer_destructive_actions": _pick(crawler_settings, "defer_destructive_actions", "deferDestructiveActions"),
-        "use_semantic_diversity": (
-            _pick(crawler_settings, "use_semantic_diversity", "useSemanticDiversity")
-            if _pick(crawler_settings, "use_semantic_diversity", "useSemanticDiversity") is not None
-            else _pick(config_json, "enable_semantic_decisions", "enableSemanticDecisions")
-        ),
+        "use_semantic_diversity": _pick(crawler_settings, "use_semantic_diversity", "useSemanticDiversity"),
         "semantic_diversity_threshold": _pick(crawler_settings, "semantic_diversity_threshold", "semanticDiversityThreshold"),
         "semantic_uncertainty_margin": _pick(crawler_settings, "semantic_uncertainty_margin", "semanticUncertaintyMargin"),
         "semantic_max_bank_size": _pick(crawler_settings, "semantic_max_bank_size", "semanticMaxBankSize"),
@@ -82,7 +142,7 @@ def _build_payload_from_db(config_json: dict[str, Any], base_url: str, session_i
         "session_id": session_id,
         "graph_id": graph_id,
         "settings": settings,
-        "input_defaults": config_json.get("inputDefaults"),
+        "input_defaults": _input_defaults(config_json),
     }
 
 
@@ -120,6 +180,7 @@ async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
             config_json, base_url, graph_id = await fetch_job_inputs(s, session_id)
 
         payload = _build_payload_from_db(config_json, base_url, session_id, graph_id)
+        generate_test_flows = _should_generate_test_flows(config_json)
         job = CrawlJob.from_dict(payload, worker._settings)
 
         crawl_task = asyncio.create_task(worker.process(job, run_permission=run_permission))
@@ -150,8 +211,14 @@ async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
 
         state_count, transition_count = await crawl_task
 
-        if status in {"RUNNING", "PAUSED"}:
-            await run_find_all_flows(ctx, session_id, graph_id)
+        flow_generation_result: dict[str, Any] | None = None
+        if generate_test_flows and status in {"RUNNING", "PAUSED"}:
+            flow_generation_result = await run_find_all_flows(
+                ctx,
+                session_id,
+                graph_id,
+                **_flow_generation_kwargs(config_json),
+            )
 
         async with db() as s:
             updated = await mark_completed_if_running(s, session_id, state_count, transition_count)
@@ -164,6 +231,7 @@ async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
             "session_id": session_id,
             "state_count": state_count,
             "transition_count": transition_count,
+            "flows": flow_generation_result,
         }
 
     except asyncio.CancelledError:

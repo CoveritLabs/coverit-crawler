@@ -110,10 +110,14 @@ class CrawlSessionExploreMixin:
             return
 
         primary = actions[-1]
+        is_login_form = self._is_login_form(form)
 
         if self._should_defer_action(primary, form.get("submit")):
             await self._defer_work(current, actions, form.get("submit"))
             return
+
+        if is_login_form:
+            await self._mark_login_state(current)
 
         await self._execute_action_sequence(current, current_info, actions)
 
