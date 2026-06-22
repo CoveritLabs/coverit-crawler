@@ -1,12 +1,12 @@
 from __future__ import annotations
-from collections import deque
-import logging
 
-from graph import Edge, FlowGraph
+import logging
+from collections import deque
+
+from src.graph.test_flow_generation.graph import Edge, FlowGraph, TestFlow
 
 logger = logging.getLogger(__name__)
 
-from graph import TestFlow
 
 class CandidateTFGenerator:
     def __init__(self, graph: FlowGraph, root_hash: str, *, max_num_of_states_per_tf: int = 15):
@@ -21,7 +21,7 @@ class CandidateTFGenerator:
 
         while pending_starts:
             start_node, seed_edge = pending_starts.pop()
-            
+
             tf = TestFlow(
                 transition_ids=[seed_edge.transition_id] if seed_edge else [],
                 node_path=[seed_edge.source, start_node] if seed_edge else [start_node]
@@ -35,7 +35,7 @@ class CandidateTFGenerator:
 
                 cycle_edges = []
                 forward_edges = []
-                
+
                 for e in out_edges:
                     if e.target in tf.visited_nodes:
                         cycle_edges.append(e)
@@ -53,12 +53,12 @@ class CandidateTFGenerator:
                     break
 
                 continue_edge, *spawn_edges = forward_edges
-                
+
                 for e in reversed(spawn_edges):
                     if e.transition_id not in seeded_transitions:
                         seeded_transitions.add(e.transition_id)
                         pending_starts.append((e.target, e))
-                
+
                 seeded_transitions.add(continue_edge.transition_id)
 
                 tf.add_step(continue_edge.transition_id, continue_edge.target)
@@ -114,9 +114,9 @@ class CandidateTFGenerator:
             continuation_ids = other.transition_ids[idx + 1:]
             if not continuation_ids or len(short_tf) + len(continuation_ids) < min_len:
                 continue
-                
+
             logger.debug("Merging short TF %s with continuation from %s", short_tf, other)
-            
+
             valid_merges.append(TestFlow(
                 transition_ids=short_tf.transition_ids + continuation_ids,
                 node_path=short_tf.node_path + other.node_path[idx + 2:]
@@ -149,12 +149,12 @@ class CandidateTFGenerator:
             ))
 
         return min(valid_merges, key=len, default=None)
-    
+
     def append_checkpoints_to_tfs(self) -> None:
         valid_starts = set(getattr(self.graph, 'checkpoints', []))
         valid_starts.add(self.root_hash)
         targets = {
-            tf.node_path[0] for tf in self.candidates 
+            tf.node_path[0] for tf in self.candidates
             if tf.node_path and tf.node_path[0] not in valid_starts
         }
 
@@ -163,7 +163,7 @@ class CandidateTFGenerator:
 
         found_prefixes: dict[str, tuple[list[str], list[str]]] = {}
         queue = deque()
-        
+
         visited = set(valid_starts)
 
         for start_node in valid_starts:
@@ -174,12 +174,12 @@ class CandidateTFGenerator:
 
             for edge in self.graph.adjacency.get(current_node, []):
                 neighbor = edge.target
-                
+
                 if neighbor in visited:
                     continue
 
                 visited.add(neighbor)
-                
+
                 new_trans_path = trans_path + [edge.transition_id]
                 new_node_path = node_path + [neighbor]
 
@@ -196,13 +196,13 @@ class CandidateTFGenerator:
                 continue
 
             start_node = tf.node_path[0]
-            
+
             if start_node in found_prefixes:
                 prefix_trans, prefix_nodes = found_prefixes[start_node]
                 tf.transition_ids = prefix_trans + tf.transition_ids
                 tf.node_path = prefix_nodes[:-1] + tf.node_path
                 logger.info("Found prefix for %s and appended it to it",start_node)
-                
+
             elif start_node in targets:
                 logger.warning("Could not find a path from any checkpoint to node %s", start_node)
 

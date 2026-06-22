@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from graph import build_flow_graph,TestFlow
-from stage1_preproccessing import CandidateTFGenerator
-from stage2_selecting_best_tf import select_tfs
+
 from src.db.enums import TestFlowType
+from src.graph.test_flow_generation.graph import TestFlow, build_flow_graph
+from src.graph.test_flow_generation.stage1_preproccessing import CandidateTFGenerator
+from src.graph.test_flow_generation.stage2_selecting_best_tf import select_tfs
+
 logger = logging.getLogger(__name__)
 
 
@@ -17,7 +19,7 @@ async def find_all_flows(
     max_num_of_states_per_tf: int = 20,
     convergence_threshold: float | None = None,
     min_num_of_tf: int | None = None,
-) ->dict[str, Any]:
+) -> dict[str, Any]:
     """Fetch raw graph from repository, generate candidate flows, and select optimal subset."""
     raw = await graph_repo.get_lightweight_flow_graph(session_id)
 
@@ -33,7 +35,6 @@ async def find_all_flows(
     )
 
     candidate_generator.generate_candidate_tfs()
-    
 
     candidate_generator.merge_short_tfs(
         min_num_of_states_per_tf=min_num_of_states_per_tf,
@@ -41,7 +42,7 @@ async def find_all_flows(
 
     candidate_generator.append_checkpoints_to_tfs()
 
-    candidates=candidate_generator.get_candidate_tfs()
+    candidates = candidate_generator.get_candidate_tfs()
 
     selected = select_tfs(
         candidates,
@@ -57,11 +58,12 @@ async def find_all_flows(
         len(candidates),
         len(selected),
     )
-    return get_payload(selected,session_id)
+    return get_payload(selected, session_id)
+
 
 def get_payload(selected_tfs: list[TestFlow], session_id: str) -> dict[str, Any]:
     """
-    Transforms the selected internal TF objects into the dictionary 
+    Transforms the selected internal TF objects into the dictionary
     payload shape required by process_incoming_flow_payload.
     """
     return {
@@ -73,5 +75,5 @@ def get_payload(selected_tfs: list[TestFlow], session_id: str) -> dict[str, Any]
                 "flow_type": TestFlowType.COVERAGE.value,
             }
             for tf in selected_tfs
-        ]
+        ],
     }

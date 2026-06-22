@@ -1,11 +1,16 @@
-import logging
+from __future__ import annotations
 
-from src.db.repositories.crawl_sessions import fetch_graph_id
-from src.graph.factory import create_graph
-from src.graph.test_flow_generation.test_flow_gen import find_all_flows 
-from src.db.repositories.test_flows import process_incoming_flow_payload
+import logging
+from typing import Any
+
 from src.config import config
+from src.db.repositories.crawl_sessions import fetch_graph_id
+from src.db.repositories.test_flows import process_incoming_flow_payload
+from src.graph.factory import create_graph
+from src.graph.test_flow_generation.test_flow_gen import find_all_flows
+
 logger = logging.getLogger(__name__)
+
 
 async def run_find_all_flows(
     ctx: dict,
@@ -15,35 +20,55 @@ async def run_find_all_flows(
     max_num_of_states_per_tf: int = 20,
     convergence_threshold: float | None = None,
     min_num_of_tf: int | None = None,
-):
+) -> dict[str, Any]:
     db = ctx["db"]
     if graph_id is None:
         async with db() as s:
             graph_id = await fetch_graph_id(s, session_id)
+    if not graph_id:
+        raise ValueError(f"graph_id is required to generate flows for crawl session {session_id}")
 
-    client, graph = await create_graph(
-        config.NEO4J_URI,
-        config.NEO4J_USER,
-        config.NEO4J_PASSWORD,
-    )
+    client = None
+    graph = ctx.get("graph_repo")
+    if graph is None:
+        client, graph = await create_graph(
+            config.NEO4J_URI,
+            config.NEO4J_USER,
+            config.NEO4J_PASSWORD,
+        )
 
-    logger.info(f"Finding flows for session: {session_id}")
+    try:
+        logger.info("Finding flows for crawl session %s from graph %s", session_id, graph_id)
 
-    flows = await find_all_flows(
-        graph_repo=graph,
-        session_id=session_id,
-        min_num_of_states_per_tf=min_num_of_states_per_tf,
-        max_num_of_states_per_tf=max_num_of_states_per_tf,
-        convergence_threshold=convergence_threshold,
-        min_num_of_tf=min_num_of_tf,
-    )
+        flows = await find_all_flows(
+            graph_repo=graph,
+            session_id=graph_id,
+            min_num_of_states_per_tf=min_num_of_states_per_tf,
+            max_num_of_states_per_tf=max_num_of_states_per_tf,
+            convergence_threshold=convergence_threshold,
+            min_num_of_tf=min_num_of_tf,
+        )
+        if not flows:
+            flows = {"flows": []}
+        flows["session_id"] = session_id
 
-    async with db() as s:
-        await process_incoming_flow_payload(s, flows)
+        async with db() as s:
+            await process_incoming_flow_payload(s, flows)
 
-    await ctx["redis"].enqueue_job(
+        await ctx["redis"].enqueue_job(
             "task_generate_bdd",
             payload=flows,
-            _queue_name="docgen:queue"
+            _queue_name="docgen:queue",
         )
-    await client.close()
+
+        flow_count = len(flows.get("flows", []))
+        logger.info("Generated %d flows for crawl session %s", flow_count, session_id)
+        return {
+            "status": "completed",
+            "session_id": session_id,
+            "graph_id": graph_id,
+            "flow_count": flow_count,
+        }
+    finally:
+        if client is not None:
+            await client.close()

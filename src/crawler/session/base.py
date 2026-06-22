@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from uuid import uuid4
 
 from src import Config, config
 from src.browser import BrowserEngine, BrowserRuntime
 from src.crawler.executor import EventExecutor
+from src.crawler.input_defaults import resolve_input_defaults
 from src.crawler.replay import StateReplayer, StateReplayInfo
 from src.crawler.risk import RiskClassifier
 from src.crawler.semantic_engine import SemanticEngine
@@ -108,16 +108,7 @@ class CrawlSessionBase:
         logger.info("Crawl session initialized")
 
     def _resolved_input_config(self) -> dict:
-        if isinstance(self._input_defaults, dict):
-            if "field_patterns" in self._input_defaults or "type_fallbacks" in self._input_defaults:
-                return self._input_defaults
-            return {"field_patterns": self._input_defaults, "type_fallbacks": {}}
-
-        if self.config_path:
-            with open(self.config_path, "r", encoding="utf-8") as handle:
-                return json.load(handle)
-
-        return {"field_patterns": {}, "type_fallbacks": {}}
+        return resolve_input_defaults(self.config_path, self._input_defaults)
 
     async def cleanup(self) -> None:
         await self.browser.stop()
@@ -235,6 +226,7 @@ class CrawlSessionBase:
         logger.info(f"Initial state: {initial_state.state_hash} at {initial_state.url}")
 
         if login_actions:
+            await self._mark_login_state(initial_state)
             reached = await self._execute_action_sequence(initial_state, info, login_actions)
             if not reached:
                 await self.graph_builder.mark_state_pending(
@@ -265,9 +257,23 @@ class CrawlSessionBase:
 
     def _select_login_form(self, forms: list[dict]) -> dict | None:
         for form in forms:
-            fields = form.get("fields", [])
-            if any(str(f.get("type", "")).lower() == "password" for f in fields):
-                submit = form.get("submit")
-                if submit and submit.get("selector"):
-                    return form
+            if self._is_login_form(form):
+                return form
         return None
+
+    def _is_login_form(self, form: dict) -> bool:
+        fields = form.get("fields", [])
+        has_password = any(str(f.get("type", "")).lower() == "password" for f in fields)
+        submit = form.get("submit")
+
+        return bool(has_password and submit and submit.get("selector"))
+
+    async def _mark_login_state(self, state: AbstractState) -> None:
+        state.metadata = dict(state.metadata or {})
+        state.metadata["is_login_state"] = True
+
+        await self.graph_builder.set_state_properties(
+            self.session_id,
+            state.state_hash,
+            {"is_login_state": True},
+        )

@@ -1,7 +1,7 @@
-import json
 from typing import Any
 
 from src import config
+from src.crawler.input_defaults import resolve_input_defaults
 from src.crawler.semantic_engine.engine import SemanticEngine
 
 
@@ -13,7 +13,7 @@ class InputValueResolver:
         confidence_threshold: float = 0.4,
         semantic_engine: SemanticEngine | None = None,
     ):
-        self._config = input_defaults if isinstance(input_defaults, dict) else self._load_config(config_path)
+        self._config = resolve_input_defaults(config_path, input_defaults)
         self._confidence_threshold = confidence_threshold
 
         field_patterns = self._config.get("field_patterns", {})
@@ -26,13 +26,6 @@ class InputValueResolver:
                 artifact_dir=config.SEMANTIC_ARTIFACT_DIR,
                 enabled=False,
             )
-
-    def _load_config(self, path: str | None) -> dict[str, Any]:
-        if not path:
-            return {"field_patterns": {}, "type_fallbacks": {}}
-
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
 
     def resolve(self, element: dict) -> str:
         resolved = self._semantic_engine.resolve_input_value(element)
