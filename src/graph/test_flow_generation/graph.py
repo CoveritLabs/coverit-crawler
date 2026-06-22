@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import logging
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ class FlowGraph:
     adjacency: dict[str, list[Edge]] = field(default_factory=dict)
     transition_count: int = 0
     checkpoints: set[str] = field(default_factory=set)
-    
+
 @dataclass(slots=True)
 class TestFlow:
     transition_ids: list[str] = field(default_factory=list)
@@ -39,7 +39,7 @@ def build_flow_graph(raw: dict) -> tuple[FlowGraph, str | None]:
     graph = FlowGraph()
 
     graph.transition_count = sum(
-        1 for t in raw.get("transitions", []) 
+        1 for t in raw.get("transitions", [])
         if t.get("source_hash") and t.get("target_hash") and t.get("transition_id")
     )
 
@@ -53,7 +53,7 @@ def build_flow_graph(raw: dict) -> tuple[FlowGraph, str | None]:
         src, tgt, tid = t.get("source_hash"), t.get("target_hash"), t.get("transition_id")
         if not (src and tgt and tid):
             continue
-        
+
         graph.adjacency.setdefault(src, []).append(Edge(source=src, target=tgt, transition_id=tid))
 
     graph.checkpoints = {s["state_hash"] for s in states if s.get("is_checkpoint")}

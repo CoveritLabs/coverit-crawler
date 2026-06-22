@@ -2,7 +2,7 @@ import asyncio
 import random
 import logging
 import time
-from test_flow_gen import find_all_flows  
+from src.graph.test_flow_generation.test_flow_gen import find_all_flows
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 

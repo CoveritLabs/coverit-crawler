@@ -3,7 +3,7 @@ from __future__ import annotations
 import heapq
 import logging
 
-from graph import TestFlow
+from src.graph.test_flow_generation.graph import TestFlow
 
 logger = logging.getLogger(__name__)
 
@@ -17,13 +17,13 @@ def select_tfs(
     min_num_of_tf: int | None = None,
     min_num_of_states_per_tf: int | None = None,
 ) -> list[TestFlow]:
-    
+
     if transition_count <= 0:
         logger.warning("transition_count <= 0; nothing to cover")
         return []
 
     eligible: list[TestFlow] = []
-    eligible_sets: list[set[str]] = []  
+    eligible_sets: list[set[str]] = []
 
     for tf in candidates:
         length = len(tf)
@@ -69,14 +69,14 @@ def select_tfs(
                     break
                 elif current_coverage >= convergence_threshold:
                     logger.info(
-                        "Target reached: within (%d) and coverage (%.2f%% >= %.2f%%)", 
+                        "Target reached: within (%d) and coverage (%.2f%% >= %.2f%%)",
                         len(selected), current_coverage * 100, convergence_threshold * 100
                     )
                     break
         else:
             if convergence_threshold is not None and current_coverage >= convergence_threshold:
                 logger.info(
-                    "Target reached: coverage %.2f%% >= %.2f%%", 
+                    "Target reached: coverage %.2f%% >= %.2f%%",
                     current_coverage * 100, convergence_threshold * 100
                 )
                 break
