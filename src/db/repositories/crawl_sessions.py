@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import func, select, update
@@ -163,3 +164,9 @@ async def fetch_graph_id(session: AsyncSession, session_id: str) -> str:
     if not graph_id:
         raise RuntimeError(f"app_version_id missing for session: {session_id}")
     return graph_id
+
+
+async def fetch_started_at(session: AsyncSession, session_id: str) -> datetime | None:
+    stmt = select(CrawlSession.started_at).where(CrawlSession.crawl_session_id == session_id)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()

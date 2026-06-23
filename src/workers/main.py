@@ -57,6 +57,10 @@ def _redis_settings_from_url(url: str) -> RedisSettings:
     )
 
 
+def _crawler_job_timeout_seconds() -> int:
+    return max(config.CRAWLER_JOB_TIMEOUT_SECONDS, config.CRAWLER_JOB_SLICE_SECONDS + 120)
+
+
 async def startup(ctx: dict) -> None:
     db_url = config.DATABASE_URL
     if not db_url:
@@ -92,7 +96,7 @@ class WorkerSettings:
     on_shutdown = shutdown
     cron_jobs = []
     max_jobs = config.CRAWLER_MAX_JOBS
-    job_timeout = config.CRAWLER_JOB_TIMEOUT_SECONDS
+    job_timeout = _crawler_job_timeout_seconds()
     keep_result = 0
     allow_abort_jobs = True
     job_serializer = arq_job_serializer

@@ -64,7 +64,7 @@ class CandidateTFGenerator:
                 tf.add_step(continue_edge.transition_id, continue_edge.target)
                 node = continue_edge.target
 
-                if len(tf) >= self.max_num_of_states_per_tf:
+                if tf.state_count >= self.max_num_of_states_per_tf:
                     self.candidates.append(tf)
                     tf = TestFlow(node_path=[node])
 
@@ -80,8 +80,8 @@ class CandidateTFGenerator:
             logger.error("Coverage failure: %d transitions missed", missing)
 
     def merge_short_tfs(self, *, min_num_of_states_per_tf: int):
-        clean = [tf for tf in self.candidates if len(tf) >= min_num_of_states_per_tf]
-        short = [tf for tf in self.candidates if len(tf) < min_num_of_states_per_tf]
+        clean = [tf for tf in self.candidates if tf.state_count >= min_num_of_states_per_tf]
+        short = [tf for tf in self.candidates if tf.state_count < min_num_of_states_per_tf]
 
         if not short:
             return clean
@@ -112,14 +112,15 @@ class CandidateTFGenerator:
                 continue
 
             continuation_ids = other.transition_ids[idx + 1:]
-            if not continuation_ids or len(short_tf) + len(continuation_ids) < min_len:
+            merged_node_path = short_tf.node_path + other.node_path[idx + 2:]
+            if not continuation_ids or len(merged_node_path) < min_len:
                 continue
 
             logger.debug("Merging short TF %s with continuation from %s", short_tf, other)
 
             valid_merges.append(TestFlow(
                 transition_ids=short_tf.transition_ids + continuation_ids,
-                node_path=short_tf.node_path + other.node_path[idx + 2:]
+                node_path=merged_node_path
             ))
 
         return min(valid_merges, key=len, default=None)
@@ -138,14 +139,15 @@ class CandidateTFGenerator:
                 continue
 
             prefix_ids = other.transition_ids[:idx]
-            if not prefix_ids or len(prefix_ids) + len(short_tf) < min_len:
+            merged_node_path = other.node_path[:idx + 1] + short_tf.node_path[1:]
+            if not prefix_ids or len(merged_node_path) < min_len:
                 continue
 
             logger.debug("Merging short TF %s with prefix from %s", short_tf, other)
 
             valid_merges.append(TestFlow(
                 transition_ids=prefix_ids + short_tf.transition_ids,
-                node_path=other.node_path[:idx + 1] + short_tf.node_path[1:]
+                node_path=merged_node_path
             ))
 
         return min(valid_merges, key=len, default=None)

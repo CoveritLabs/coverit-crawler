@@ -23,7 +23,7 @@ logging.getLogger("neo4j.notifications").propagate = False
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://juice-shop.herokuapp.com/"
+BASE_URL = "https://www.saucedemo.com/"
 QUOTES = "https://quotes.toscrape.com/"
 BOOKS = "https://books.toscrape.com/"
 OTHER_URL = "https://en.wikipedia.org/wiki/Main_Page"

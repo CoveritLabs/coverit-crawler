@@ -26,7 +26,7 @@ def select_tfs(
     eligible_sets: list[set[str]] = []
 
     for tf in candidates:
-        length = len(tf)
+        length = tf.state_count
         if min_num_of_states_per_tf is None or length >= min_num_of_states_per_tf:
             eligible.append(tf)
             eligible_sets.append(set(tf.transition_ids))

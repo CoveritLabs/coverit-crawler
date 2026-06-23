@@ -51,6 +51,9 @@ DOM_RECORDER_SCRIPT = (
 STATE_HASH_SCRIPT = (SRC_DIR / "browser" / "js" / "get_state_hash.js").read_text(
     encoding="utf-8"
 )
+ANNOTATED_PAGE_CONTENT_SCRIPT = (
+    SRC_DIR / "browser" / "js" / "get_annotated_page_content.js"
+).read_text(encoding="utf-8")
 
 SelectorResolver = Callable[[str, str], Awaitable[bool]]
 
@@ -118,10 +121,17 @@ async def _wait_for_page_settle(page: Any, job: CrawlJob) -> None:
         pass
 
 
+async def _capture_manual_html(page: Any) -> str:
+    try:
+        return await page.evaluate(ANNOTATED_PAGE_CONTENT_SCRIPT)
+    except Exception:
+        return await page.content()
+
+
 async def _capture_manual_state(page: Any, job: CrawlJob) -> AbstractState:
     await _wait_for_page_settle(page, job)
     semantic = await page.evaluate(STATE_HASH_SCRIPT)
-    html = await page.content()
+    html = await _capture_manual_html(page)
     url = str(getattr(page, "url", "") or "")
     if url.endswith("?"):
         url = url[:-1]

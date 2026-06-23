@@ -29,6 +29,10 @@ class TestFlow:
     def __len__(self) -> int:
         return len(self.transition_ids)
 
+    @property
+    def state_count(self) -> int:
+        return len(self.node_path)
+
     def add_step(self, transition_id: str, target_node: str) -> None:
         self.transition_ids.append(transition_id)
         self.node_path.append(target_node)

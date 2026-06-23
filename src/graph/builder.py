@@ -205,6 +205,9 @@ class Neo4jGraphBuilder:
     async def get_lightweight_flow_graph(self, session_id: str) -> dict:
         return await self.repo.get_lightweight_flow_graph(session_id)
 
+    async def get_crawl_progress(self, session_id: str, *, crawl_session_id: str = "") -> dict[str, int]:
+        return await self.repo.get_crawl_progress(session_id, crawl_session_id=crawl_session_id)
+
     async def get_data_from_flow_query(
         self,
         session_id: str,

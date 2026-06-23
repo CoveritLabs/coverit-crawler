@@ -352,19 +352,56 @@ DETACH DELETE n
 """
 
 GET_LIGHTWEIGHT_FLOW_GRAPH = """
-MATCH (s:State {session_id: $session_id})
-OPTIONAL MATCH (s)-[t:TRANSITION]->(target:State)
-RETURN
+MATCH (s:State {graph_id: $session_id})
+OPTIONAL MATCH (s)-[t:TRANSITION {graph_id: $session_id}]->(target:State {graph_id: $session_id})
+WITH
     collect(DISTINCT {
         state_hash: s.state_hash,
         first_seen: s.first_seen,
         is_checkpoint: s.is_checkpoint
     }) AS states,
-    collect(DISTINCT {
-        source_hash: s.state_hash,
-        target_hash: target.state_hash,
-        transition_id: t.transition_id
-    }) AS transitions
+    collect(DISTINCT CASE
+        WHEN t IS NULL OR target IS NULL THEN NULL
+        ELSE {
+            source_hash: s.state_hash,
+            target_hash: target.state_hash,
+            transition_id: t.transition_id
+        }
+    END) AS raw_transitions
+RETURN
+    states,
+    [transition IN raw_transitions WHERE transition IS NOT NULL] AS transitions
+"""
+
+GET_CRAWL_PROGRESS = """
+CALL {
+    MATCH (s:State {graph_id: $session_id})
+    RETURN count(s) AS state_count
+}
+CALL {
+    MATCH ()-[t:TRANSITION {graph_id: $session_id}]->()
+    RETURN count(t) AS transition_count
+}
+CALL {
+    MATCH (f:StateFrontier {
+        graph_id: $session_id,
+        crawl_session_id: $crawl_session_id,
+        status: 'pending'
+    })
+    RETURN count(f) AS pending_state_count
+}
+CALL {
+    MATCH (d:DeferredWork {
+        graph_id: $session_id,
+        crawl_session_id: $crawl_session_id,
+        status: 'pending'
+    })
+    RETURN count(d) AS pending_deferred_count
+}
+RETURN state_count,
+       transition_count,
+       pending_state_count,
+       pending_deferred_count
 """
 
 GET_DATA_FROM_FLOW_QUERY = """
