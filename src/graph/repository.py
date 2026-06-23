@@ -12,6 +12,7 @@ from src.graph.queries import (
     CLEAR_SESSION,
     FIND_EQUIVALENT_TRANSITION,
     GET_ACTIONS,
+    GET_CRAWL_PROGRESS,
     GET_DATA_FROM_FLOW_QUERY,
     GET_GRAPH,
     GET_LIGHTWEIGHT_FLOW_GRAPH,
@@ -480,6 +481,28 @@ class GraphRepository:
             if not record:
                 return {"states": [], "transitions": []}
             return record.data()
+
+    async def get_crawl_progress(self, session_id: str, *, crawl_session_id: str = "") -> dict[str, int]:
+        async with self._driver.session() as session:
+            result = await session.run(
+                GET_CRAWL_PROGRESS,
+                session_id=session_id,
+                crawl_session_id=crawl_session_id,
+            )
+            record = await result.single()
+            if not record:
+                return {
+                    "state_count": 0,
+                    "transition_count": 0,
+                    "pending_state_count": 0,
+                    "pending_deferred_count": 0,
+                }
+            return {
+                "state_count": int(record.get("state_count") or 0),
+                "transition_count": int(record.get("transition_count") or 0),
+                "pending_state_count": int(record.get("pending_state_count") or 0),
+                "pending_deferred_count": int(record.get("pending_deferred_count") or 0),
+            }
 
     async def get_data_from_flow_query(
         self,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from uuid import uuid4
 
 from src import Config, config
@@ -35,9 +36,15 @@ class CrawlSessionBase:
         settings: Config = config,
         risk_classifier: RiskClassifier | None = None,
         run_permission: asyncio.Event | None = None,
+        stop_requested: asyncio.Event | None = None,
+        slice_deadline_monotonic: float | None = None,
+        initial_state_count: int = 0,
+        initial_transition_count: int = 0,
     ):
         self._settings = settings
         self._run_permission = run_permission
+        self._stop_requested = stop_requested
+        self._slice_deadline_monotonic = slice_deadline_monotonic
         self.base_url = base_url
         self.graph_builder = graph_builder
         self.headless = settings.HEADLESS if headless is None else headless
@@ -60,8 +67,8 @@ class CrawlSessionBase:
         self._semantic_engine: SemanticEngine | None = None
         self._max_states: int = int(max_states if max_states is not None else getattr(settings, "MAX_STATES", 1000))
         self._max_transitions: int = int(max_transitions if max_transitions is not None else getattr(settings, "MAX_TRANSITIONS", 5000))
-        self._state_count: int = 0
-        self._transition_count: int = 0
+        self._state_count: int = int(initial_state_count)
+        self._transition_count: int = int(initial_transition_count)
 
     @property
     def state_count(self) -> int:
@@ -159,12 +166,21 @@ class CrawlSessionBase:
     def _within_limits(self) -> bool:
         return self._state_count < self._max_states and self._transition_count < self._max_transitions
 
+    def _stop_requested_now(self) -> bool:
+        return bool(self._stop_requested and self._stop_requested.is_set())
+
+    def _slice_expired(self) -> bool:
+        return self._slice_deadline_monotonic is not None and time.monotonic() >= self._slice_deadline_monotonic
+
+    def _can_continue(self) -> bool:
+        return self._within_limits() and not self._stop_requested_now() and not self._slice_expired()
+
     async def run_crawl(self) -> None:
         try:
             await self.initialize()
             await self._seed_initial_state()
 
-            while self._within_limits():
+            while self._can_continue():
                 await self._wait_permission()
                 current = await self.get_next_state()
                 if current:
@@ -186,6 +202,11 @@ class CrawlSessionBase:
                         continue
 
                 break
+
+            if self._slice_expired():
+                logger.info("Crawl slice deadline reached; yielding session %s", self.crawl_session_id)
+            elif self._stop_requested_now():
+                logger.info("Crawl stop requested; yielding session %s", self.crawl_session_id)
 
             logger.info(f"Crawl complete. States: {self._state_count}, Transitions: {self._transition_count}")
         except Exception as e:

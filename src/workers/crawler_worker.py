@@ -67,7 +67,16 @@ class CrawlerWorker:
             await self._graph_builder.disconnect()
             self._started = False
 
-    async def process(self, job: CrawlJob, run_permission: Optional[asyncio.Event] = None) -> tuple[int, int]:
+    async def process(
+        self,
+        job: CrawlJob,
+        run_permission: Optional[asyncio.Event] = None,
+        *,
+        stop_requested: asyncio.Event | None = None,
+        slice_deadline_monotonic: float | None = None,
+        initial_state_count: int = 0,
+        initial_transition_count: int = 0,
+    ) -> tuple[int, int]:
         job_settings = _job_settings(self._settings, job)
         browser_runtime = (
             self._browser_runtime
@@ -88,6 +97,10 @@ class CrawlerWorker:
             settings=job_settings,
             browser_runtime=browser_runtime,
             run_permission=run_permission,
+            stop_requested=stop_requested,
+            slice_deadline_monotonic=slice_deadline_monotonic,
+            initial_state_count=initial_state_count,
+            initial_transition_count=initial_transition_count,
         )
         await session.run_crawl()
         return session.state_count, session.transition_count
