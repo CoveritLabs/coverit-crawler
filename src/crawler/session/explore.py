@@ -32,7 +32,6 @@ class CrawlSessionExploreMixin:
             await self._prepare_state()
 
             current_info = await self._get_current_state_info(current)
-
             if not current_info or not self.executor:
                 return
 
@@ -87,7 +86,7 @@ class CrawlSessionExploreMixin:
             if not self._within_limits():
                 break
 
-            if not self._should_process_element(element, elements):
+            if not self._should_process_element(element):
                 continue
 
             await self._wait_permission()
@@ -152,14 +151,11 @@ class CrawlSessionExploreMixin:
     def _should_process_element(
         self,
         element: dict,
-        state_elements: list[dict] | None = None,
     ) -> bool:
         if element.get("disabled"):
             return False
-
         if element.get("in_form"):
             return False
-
         if self._is_blocked_anchor(element):
             return False
 
