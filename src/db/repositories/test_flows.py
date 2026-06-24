@@ -136,3 +136,32 @@ async def fetch_test_flow_details(
         }
         for row in result.all()
     ]
+
+
+async def fetch_flow_editor_inputs(
+    session: AsyncSession,
+    flow_id: str,
+) -> dict[str, Any] | None:
+    stmt = select(TestFlow).where(TestFlow.id == flow_id)
+    result = await session.execute(stmt)
+    flow = result.scalar_one_or_none()
+    if flow is None:
+        return None
+
+    crawl_session = flow.crawl_session
+    graph_id = flow.app_version_id if flow.test_flow_type == TestFlowType.COVERAGE else flow.crawl_session_id
+
+    return {
+        "flow_id": flow.id,
+        "crawl_session_id": flow.crawl_session_id,
+        "app_version_id": flow.app_version_id,
+        "graph_id": graph_id,
+        "checkpoint_hash": flow.checkpoint_state_hash,
+        "transition_refs": list(flow.transition_refs or []),
+        "editor_steps": list(flow.editor_steps or []),
+        "test_flow_type": flow.test_flow_type.value
+        if isinstance(flow.test_flow_type, TestFlowType)
+        else str(flow.test_flow_type or ""),
+        "base_url": getattr(crawl_session, "base_url_snapshot", "") or "",
+        "config": getattr(crawl_session, "config", None) or {},
+    }

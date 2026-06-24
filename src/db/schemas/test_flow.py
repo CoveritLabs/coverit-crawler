@@ -1,6 +1,8 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, func
+from typing import Any
+
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -29,6 +31,8 @@ class TestFlow(Base):
     checkpoint_state_hash: Mapped[str] = mapped_column(String)
 
     transition_refs: Mapped[list[str]] = mapped_column(ARRAY(String))
+
+    editor_steps: Mapped[list[dict[str, Any]] | Any] = mapped_column(JSON, default=list)
 
     test_flow_type: Mapped[TestFlowType] = mapped_column(test_flow_type_enum)
 

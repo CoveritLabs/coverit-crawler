@@ -1,3 +1,5 @@
+import ssl
+
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
@@ -9,6 +11,9 @@ def _query_value(value) -> str:
 
 
 def create_engine(database_url: str) -> AsyncEngine:
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql://", 1)
+
     url = make_url(database_url)
     connect_args = {}
 
@@ -21,7 +26,11 @@ def create_engine(database_url: str) -> AsyncEngine:
 
     sslmode = url.query.get("sslmode")
     if sslmode:
-        connect_args["ssl"] = _query_value(sslmode).lower() not in {"disable", "allow", "prefer"}
+        sslmode_value = _query_value(sslmode).lower()
+        if sslmode_value == "no-verify":
+            connect_args["ssl"] = ssl._create_unverified_context()
+        else:
+            connect_args["ssl"] = sslmode_value not in {"disable", "allow", "prefer"}
 
     connect_timeout = url.query.get("connect_timeout")
     if connect_timeout:
