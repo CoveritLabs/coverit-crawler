@@ -1580,7 +1580,7 @@ async def manual_record_session(ctx: dict, session_id: str) -> dict[str, Any]:
 
     try:
         async with db() as s:
-            config_json, base_url, graph_id = await fetch_job_inputs(s, session_id)
+            config_json, base_url, graph_id, _state_count, _transition_count = await fetch_job_inputs(s, session_id)
 
         payload = _build_payload_from_db(config_json, base_url, session_id, graph_id)
         job = CrawlJob.from_dict(payload, config)

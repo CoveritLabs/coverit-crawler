@@ -40,6 +40,8 @@ class CrawlSessionBase:
         slice_deadline_monotonic: float | None = None,
         initial_state_count: int = 0,
         initial_transition_count: int = 0,
+        initial_discovered_state_count: int = 0,
+        initial_discovered_transition_count: int = 0,
     ):
         self._settings = settings
         self._run_permission = run_permission
@@ -69,6 +71,8 @@ class CrawlSessionBase:
         self._max_transitions: int = int(max_transitions if max_transitions is not None else getattr(settings, "MAX_TRANSITIONS", 5000))
         self._state_count: int = int(initial_state_count)
         self._transition_count: int = int(initial_transition_count)
+        self._discovered_state_count: int = int(initial_discovered_state_count)
+        self._discovered_transition_count: int = int(initial_discovered_transition_count)
 
     @property
     def state_count(self) -> int:
@@ -77,6 +81,14 @@ class CrawlSessionBase:
     @property
     def transition_count(self) -> int:
         return self._transition_count
+
+    @property
+    def discovered_state_count(self) -> int:
+        return self._discovered_state_count
+
+    @property
+    def discovered_transition_count(self) -> int:
+        return self._discovered_transition_count
 
     async def _wait_permission(self) -> None:
         if self._run_permission is not None:
@@ -147,6 +159,7 @@ class CrawlSessionBase:
         state.html = ""
         if created:
             self._state_count += 1
+            self._discovered_state_count += 1
         return created
 
     async def get_next_state(self) -> AbstractState | None:
@@ -158,6 +171,7 @@ class CrawlSessionBase:
         created = await self.graph_builder.add_transition(transition)
         if created:
             self._transition_count += 1
+            self._discovered_transition_count += 1
 
     @property
     def is_complete(self) -> bool:

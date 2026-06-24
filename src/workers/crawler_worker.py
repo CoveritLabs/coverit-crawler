@@ -76,6 +76,8 @@ class CrawlerWorker:
         slice_deadline_monotonic: float | None = None,
         initial_state_count: int = 0,
         initial_transition_count: int = 0,
+        initial_discovered_state_count: int = 0,
+        initial_discovered_transition_count: int = 0,
     ) -> tuple[int, int]:
         job_settings = _job_settings(self._settings, job)
         browser_runtime = (
@@ -101,9 +103,11 @@ class CrawlerWorker:
             slice_deadline_monotonic=slice_deadline_monotonic,
             initial_state_count=initial_state_count,
             initial_transition_count=initial_transition_count,
+            initial_discovered_state_count=initial_discovered_state_count,
+            initial_discovered_transition_count=initial_discovered_transition_count,
         )
         await session.run_crawl()
-        return session.state_count, session.transition_count
+        return session.discovered_state_count, session.discovered_transition_count
 
 
 async def _run_once(args: argparse.Namespace, settings: Config) -> int:

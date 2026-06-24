@@ -14,6 +14,7 @@ from src.db.repositories.crawl_sessions import (
     mark_completed_if_running,
     mark_failed_if_running,
     mark_finished_at_if_aborted,
+    update_counts_if_active,
 )
 from src.db.services.crawl_sessions import ensure_started_or_skip_aborted
 from src.graph.test_flow_generation.stage2_selecting_best_tf import MAX_TF_TAKEN
@@ -259,7 +260,13 @@ async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
 
     try:
         async with db() as s:
-            config_json, base_url, graph_id = await fetch_job_inputs(s, session_id)
+            (
+                config_json,
+                base_url,
+                graph_id,
+                discovered_state_count,
+                discovered_transition_count,
+            ) = await fetch_job_inputs(s, session_id)
             started_at = await fetch_started_at(s, session_id)
 
         payload = _build_payload_from_db(config_json, base_url, session_id, graph_id)
@@ -283,6 +290,8 @@ async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
                 slice_deadline_monotonic=slice_deadline_monotonic,
                 initial_state_count=initial_state_count,
                 initial_transition_count=initial_transition_count,
+                initial_discovered_state_count=discovered_state_count,
+                initial_discovered_transition_count=discovered_transition_count,
             )
         )
         poll_task = asyncio.create_task(abort_poller())
@@ -309,21 +318,20 @@ async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
                 await mark_finished_at_if_aborted(s, session_id)
             return {"status": "aborted", "session_id": session_id}
 
-        state_count, transition_count = await crawl_task
+        discovered_state_count, discovered_transition_count = await crawl_task
         progress = await _crawl_progress(worker, graph_id, session_id)
-        persisted_state_count, persisted_transition_count = _progress_counts(progress)
-        state_count = max(state_count, persisted_state_count)
-        transition_count = max(transition_count, persisted_transition_count)
 
         async with db() as s:
             status = await get_session_status(s, session_id)
 
         if pause_event.is_set() or status == "PAUSED":
+            async with db() as s:
+                await update_counts_if_active(s, session_id, discovered_state_count, discovered_transition_count)
             return {
                 "status": "paused",
                 "session_id": session_id,
-                "state_count": state_count,
-                "transition_count": transition_count,
+                "state_count": discovered_state_count,
+                "transition_count": discovered_transition_count,
             }
 
         if status == "ABORTED":
@@ -337,6 +345,8 @@ async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
                 raise TimeoutError(f"Crawl timed out after {_timeout_seconds(config_json)} seconds")
 
             continuation_job_id = await _enqueue_continuation(ctx, worker, session_id)
+            async with db() as s:
+                await update_counts_if_active(s, session_id, discovered_state_count, discovered_transition_count)
             logger.info(
                 "Crawl session %s yielded with pending work; enqueued continuation %s",
                 session_id,
@@ -345,8 +355,8 @@ async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
             return {
                 "status": "continued",
                 "session_id": session_id,
-                "state_count": state_count,
-                "transition_count": transition_count,
+                "state_count": discovered_state_count,
+                "transition_count": discovered_transition_count,
                 "continuation_job_id": continuation_job_id,
             }
 
@@ -360,7 +370,7 @@ async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
             )
 
         async with db() as s:
-            updated = await mark_completed_if_running(s, session_id, state_count, transition_count)
+            updated = await mark_completed_if_running(s, session_id, discovered_state_count, discovered_transition_count)
             if not updated:
                 await mark_finished_at_if_aborted(s, session_id)
                 return {"status": "aborted", "session_id": session_id}
@@ -368,8 +378,8 @@ async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
         return {
             "status": "completed",
             "session_id": session_id,
-            "state_count": state_count,
-            "transition_count": transition_count,
+            "state_count": discovered_state_count,
+            "transition_count": discovered_transition_count,
             "flows": flow_generation_result,
         }
 
