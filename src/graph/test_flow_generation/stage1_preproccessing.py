@@ -4,7 +4,9 @@ import logging
 from collections import deque
 
 from src.graph.test_flow_generation.graph import Edge, FlowGraph, TestFlow
-
+from src.models import CrawlAction
+from src.crawler.fingerprints import transition_fingerprint,action_key_fingerprint
+from src.models.graph import AbstractTransition
 logger = logging.getLogger(__name__)
 
 
@@ -99,61 +101,57 @@ class CandidateTFGenerator:
         self.candidates = clean + merged
 
     def _try_forward_merge(self, short_tf: TestFlow, clean_pool: list[TestFlow], min_len: int) -> TestFlow | None:
-        if not short_tf.transition_ids:
+        if not short_tf.node_path:
             return None
 
-        last_id = short_tf.transition_ids[-1]
+        target_node = short_tf.node_path[-1]
         valid_merges = []
 
         for other in clean_pool:
-            try:
-                idx = other.transition_ids.index(last_id)
-            except ValueError:
-                continue
+            indices = [i for i, n in enumerate(other.node_path) if n == target_node]  
+            for idx in indices:
+                continuation_nodes = other.node_path[idx + 1:]
+                continuation_transitions = other.transition_ids[idx:]
+                
+                if not continuation_nodes or (len(short_tf.node_path) + len(continuation_nodes)) < min_len:
+                    continue
+                
+                logger.debug("Merging short TF %s with continuation from %s at index %d", short_tf, other, idx)
+                
+                valid_merges.append(TestFlow(
+                    transition_ids=short_tf.transition_ids + continuation_transitions,
+                    node_path=short_tf.node_path + continuation_nodes
+                ))
 
-            continuation_ids = other.transition_ids[idx + 1:]
-            merged_node_path = short_tf.node_path + other.node_path[idx + 2:]
-            if not continuation_ids or len(merged_node_path) < min_len:
-                continue
-
-            logger.debug("Merging short TF %s with continuation from %s", short_tf, other)
-
-            valid_merges.append(TestFlow(
-                transition_ids=short_tf.transition_ids + continuation_ids,
-                node_path=merged_node_path
-            ))
-
-        return min(valid_merges, key=len, default=None)
+        return min(valid_merges, key=lambda tf: len(tf.node_path), default=None)
 
     def _try_backward_merge(self, short_tf: TestFlow, clean_pool: list[TestFlow], min_len: int) -> TestFlow | None:
-        if not short_tf.transition_ids:
+        if not short_tf.node_path:
             return None
 
-        first_id = short_tf.transition_ids[0]
+        target_node = short_tf.node_path[0]
         valid_merges = []
 
         for other in clean_pool:
-            try:
-                idx = other.transition_ids.index(first_id)
-            except ValueError:
-                continue
+            indices = [i for i, n in enumerate(other.node_path) if n == target_node]
+            for idx in indices:
+                prefix_nodes = other.node_path[:idx]
+                prefix_transitions = other.transition_ids[:idx]
+                
+                if not prefix_nodes or (len(prefix_nodes) + len(short_tf.node_path)) < min_len:
+                    continue
 
-            prefix_ids = other.transition_ids[:idx]
-            merged_node_path = other.node_path[:idx + 1] + short_tf.node_path[1:]
-            if not prefix_ids or len(merged_node_path) < min_len:
-                continue
+                logger.debug("Merging short TF %s with prefix from %s at index %d", short_tf, other, idx)
 
-            logger.debug("Merging short TF %s with prefix from %s", short_tf, other)
+                valid_merges.append(TestFlow(
+                    transition_ids=prefix_transitions + short_tf.transition_ids,
+                    node_path=prefix_nodes + short_tf.node_path
+                ))
 
-            valid_merges.append(TestFlow(
-                transition_ids=prefix_ids + short_tf.transition_ids,
-                node_path=merged_node_path
-            ))
-
-        return min(valid_merges, key=len, default=None)
-
+        return min(valid_merges, key=lambda tf: len(tf.node_path), default=None)
+    
     def append_checkpoints_to_tfs(self) -> None:
-        valid_starts = set(getattr(self.graph, 'checkpoints', []))
+        valid_starts = set(self.graph.checkpoints.keys())
         valid_starts.add(self.root_hash)
         targets = {
             tf.node_path[0] for tf in self.candidates
@@ -209,5 +207,60 @@ class CandidateTFGenerator:
                 logger.warning("Could not find a path from any checkpoint to node %s", start_node)
 
 
+
+    def append_login_to_tfs(self, *, login_hash: str | None, graph_repo,graph_id: str,session_id: str) -> list[TestFlow]:
+        if not login_hash:
+            logger.warning("No login_hash provided; skipping login prefixing")
+            return self.candidates
+
+        for tf in self.candidates:
+            if not tf.node_path:
+                continue
+
+            start_node = tf.node_path[0]
+
+            if start_node == login_hash:
+                logger.info("TF %s already starts with login node; no prefix needed", tf)
+                continue
+
+            """
+            Add transition navigate from login_hash to start_node given that we already called
+            append_checkpoints_to_tfs() and thus start_node is guaranteed to be a checkpoint.
+            """ 
+            
+            action = CrawlAction(action_type="navigate", value=self.graph.checkpoints.get(start_node) or "", description="Navigate to URL")
+
+            fp = transition_fingerprint(
+                graph_id=graph_id,
+                source_state_hash=login_hash,
+                target_state_hash=start_node,
+                action=action,
+            )
+            transition = AbstractTransition(
+                session_id=session_id,
+                graph_id=graph_id,
+                transition_id=fp,
+                source_state_hash=login_hash,
+                target_state_hash=start_node,
+                action_type="navigate",
+                action_description=action.description,
+                locator_id="",
+                locator_value="",
+                action_value=action.value,
+                action_fingerprint=fp,
+                action_stable_key=action_key_fingerprint(action),
+            )
+            graph_repo.add_transition(transition)
+
+            """
+            Prepend the login transition to the TestFlow.
+            """
+            tf.transition_ids.insert(0, transition.transition_id)
+            tf.node_path.insert(0, login_hash)
+
+        return self.candidates
+
     def get_candidate_tfs(self) -> list[TestFlow]:
         return self.candidates
+    
+

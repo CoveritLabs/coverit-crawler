@@ -15,7 +15,7 @@ class Edge:
 class FlowGraph:
     adjacency: dict[str, list[Edge]] = field(default_factory=dict)
     transition_count: int = 0
-    checkpoints: set[str] = field(default_factory=set)
+    checkpoints: dict[str, str] = field(default_factory=dict)
 
 @dataclass(slots=True)
 class TestFlow:
@@ -38,29 +38,21 @@ class TestFlow:
         self.node_path.append(target_node)
         self.visited_nodes.add(target_node)
 
-def build_flow_graph(raw: dict) -> tuple[FlowGraph, str | None]:
-    states = [s for s in raw.get("states", []) if s.get("state_hash")]
+def build_flow_graph(states: list, transitions: list) -> FlowGraph:
     graph = FlowGraph()
 
-    graph.transition_count = sum(
-        1 for t in raw.get("transitions", [])
-        if t.get("source_hash") and t.get("target_hash") and t.get("transition_id")
-    )
-
-    root_hash = None
-    if states:
-        with_ts = [s for s in states if s.get("first_seen") is not None]
-        root = min(with_ts, key=lambda x: x["first_seen"]) if with_ts else states[0]
-        root_hash = root["state_hash"]
-
-    for t in raw.get("transitions", []):
+    for t in transitions:
         src, tgt, tid = t.get("source_hash"), t.get("target_hash"), t.get("transition_id")
         if not (src and tgt and tid):
             continue
-
         graph.adjacency.setdefault(src, []).append(Edge(source=src, target=tgt, transition_id=tid))
+        graph.transition_count += 1
 
-    graph.checkpoints = {s["state_hash"] for s in states if s.get("is_checkpoint")}
+    graph.checkpoints = {
+        s["state_hash"]: s.get("checkpoint_url") 
+        for s in states 
+        if s.get("is_checkpoint") and s.get("state_hash")
+    }
 
     logger.info("Built graph: %d real transitions", graph.transition_count)
-    return graph, root_hash
+    return graph
