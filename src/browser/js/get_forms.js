@@ -11,6 +11,25 @@
         return String(value).replace(/\\/g, "\\\\").replace(/\"/g, "\\\"");
     };
 
+    const resolveFormAction = (form) => {
+        const currentUrl = form.ownerDocument && form.ownerDocument.location
+            ? String(form.ownerDocument.location.href || "")
+            : window.location.href;
+        const rawAction = form.getAttribute ? (form.getAttribute("action") || "") : "";
+        if (!rawAction) return currentUrl;
+
+        try {
+            return new URL(rawAction, currentUrl).href;
+        } catch {
+            return String(rawAction);
+        }
+    };
+
+    const resolveFormMethod = (form) => {
+        const rawMethod = form.getAttribute ? (form.getAttribute("method") || "get") : "get";
+        return String(rawMethod || "get").toLowerCase();
+    };
+
     const isVisible = (el) => {
         if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
         if (el.hidden) return false;
@@ -190,10 +209,11 @@
                 form.querySelectorAll('button[type="submit"], input[type="submit"], button:not([type]), [role="button"], [onclick]')
             ).filter(isVisible);
             const submit = toSubmit(candidates[0] || null, root.frame);
-            const method = (form.method || "get").toLowerCase();
+            const method = resolveFormMethod(form);
             const hasFillable = fields.some(isFillableField);
-            const resolvedAction = form.action || "";
-            const baseCurrentUrl = window.location.href.split('?')[0].split('#')[0];
+            const resolvedAction = resolveFormAction(form);
+            const currentUrl = root.doc && root.doc.location ? String(root.doc.location.href || "") : window.location.href;
+            const baseCurrentUrl = currentUrl.split('?')[0].split('#')[0];
             const baseActionUrl = resolvedAction.split('?')[0].split('#')[0];
 
             if (method === "get" && fields.length === 0) {
@@ -204,7 +224,7 @@
             forms.push({
                 form_id: form.id || `form-${forms.length}`,
                 method,
-                action: form.action || "",
+                action: resolvedAction,
                 fields,
                 submit,
                 has_fillable_fields: hasFillable,
