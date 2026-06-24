@@ -19,7 +19,6 @@ dependencies = [
   "aiohttp>=3.8.0",
   "joblib>=1.4.0",
   "numpy>=1.26.0",
-  "scikit-learn>=1.4.0",
 ]
 
 [project.optional-dependencies]
