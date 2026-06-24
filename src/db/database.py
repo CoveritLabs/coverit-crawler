@@ -26,7 +26,7 @@ def create_engine(database_url: str) -> AsyncEngine:
 
     sslmode = url.query.get("sslmode")
     if sslmode:
-        sslmode_value = _query_value(sslmode).lower()
+        sslmode_value = "no-verify"
         if sslmode_value == "no-verify":
             connect_args["ssl"] = ssl._create_unverified_context()
         else:

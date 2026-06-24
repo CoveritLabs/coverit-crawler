@@ -19,6 +19,7 @@ async def find_all_flows(
     max_num_of_states_per_tf: int = 20,
     convergence_threshold: float | None = None,
     min_num_of_tf: int | None = None,
+    max_num_of_tf: int | None = None,
 ) -> dict[str, Any]:
     """Fetch raw graph from repository, generate candidate flows, and select optimal subset."""
     raw = await graph_repo.get_lightweight_flow_graph(graph_id)
@@ -57,6 +58,7 @@ async def find_all_flows(
         transition_count=graph.transition_count,
         convergence_threshold=convergence_threshold,
         min_num_of_tf=min_num_of_tf,
+        max_num_of_tf=max_num_of_tf,
         min_num_of_states_per_tf=min_num_of_states_per_tf,
     )
 

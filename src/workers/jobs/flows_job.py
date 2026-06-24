@@ -20,6 +20,8 @@ async def run_find_all_flows(
     max_num_of_states_per_tf: int = 20,
     convergence_threshold: float | None = None,
     min_num_of_tf: int | None = None,
+    max_num_of_tf: int | None = None,
+    enqueue_bdd: bool = False,
 ) -> dict[str, Any]:
     db = ctx["db"]
     if graph_id is None:
@@ -48,6 +50,7 @@ async def run_find_all_flows(
             max_num_of_states_per_tf=max_num_of_states_per_tf,
             convergence_threshold=convergence_threshold,
             min_num_of_tf=min_num_of_tf,
+            max_num_of_tf=max_num_of_tf,
         )
         if not flows:
             flows = {"flows": []}
@@ -75,11 +78,12 @@ async def run_find_all_flows(
 
         flows["flow_ids"] = flow_ids
 
-        await ctx["redis"].enqueue_job(
-            "task_generate_bdd",
-            payload=flows,
-            _queue_name="docgen:queue",
-        )
+        if enqueue_bdd:
+            await ctx["redis"].enqueue_job(
+                "task_generate_bdd",
+                payload=flows,
+                _queue_name="docgen:queue",
+            )
 
         logger.info("Generated %d flows for crawl session %s", flow_count, session_id)
         return {

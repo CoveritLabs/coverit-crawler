@@ -351,7 +351,7 @@ DETACH DELETE n
 """
 
 GET_LIGHTWEIGHT_FLOW_GRAPH = """
-MATCH (s:State {graph_id: $session_id})
+MATCH (s:State {graph_id: $graph_id})
 WITH s ORDER BY s.first_seen ASC
 
 WITH collect(s) AS ordered_states
@@ -361,7 +361,7 @@ WITH
     ordered_states
 
 UNWIND ordered_states AS s
-OPTIONAL MATCH (s)-[t:TRANSITION {graph_id: $session_id}]->(target:State {graph_id: $session_id})
+OPTIONAL MATCH (s)-[t:TRANSITION {graph_id: $graph_id}]->(target:State {graph_id: $graph_id})
 
 RETURN 
     root_hash,
