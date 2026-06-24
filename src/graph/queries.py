@@ -1,11 +1,11 @@
 ADD_STATE = """
-MERGE (s:State {graph_id: $session_id, state_hash: $state_hash})
+MERGE (s:State {graph_id: $graph_id, state_hash: $state_hash})
 ON CREATE SET
     s.url = $url,
     s.title = $title,
     s.html = $html,
-    s.session_id = $crawl_session_id,
-    s.session_ids = CASE WHEN $crawl_session_id = '' THEN [] ELSE [$crawl_session_id] END,
+    s.session_id = $session_id,
+    s.session_ids = CASE WHEN $session_id = '' THEN [] ELSE [$session_id] END,
     s.first_seen = timestamp(),
     s.last_seen = timestamp(),
     s._was_created = true
@@ -13,21 +13,21 @@ ON MATCH SET
     s.url = $url,
     s.title = $title,
     s.html = $html,
-    s.session_id = CASE WHEN $crawl_session_id = '' THEN s.session_id ELSE $crawl_session_id END,
+    s.session_id = CASE WHEN $session_id = '' THEN s.session_id ELSE $session_id END,
     s.last_seen = timestamp(),
     s._was_created = false
 WITH s, s._was_created AS created
 SET s.session_ids = CASE
-    WHEN $crawl_session_id = '' THEN coalesce(s.session_ids, [])
-    WHEN $crawl_session_id IN coalesce(s.session_ids, []) THEN coalesce(s.session_ids, [])
-    ELSE coalesce(s.session_ids, []) + [$crawl_session_id]
+    WHEN $session_id = '' THEN coalesce(s.session_ids, [])
+    WHEN $session_id IN coalesce(s.session_ids, []) THEN coalesce(s.session_ids, [])
+    ELSE coalesce(s.session_ids, []) + [$session_id]
 END
 REMOVE s._was_created
 WITH s, created
-FOREACH (_ IN CASE WHEN $enqueue AND $crawl_session_id <> '' THEN [1] ELSE [] END |
+FOREACH (_ IN CASE WHEN $enqueue AND $session_id <> '' THEN [1] ELSE [] END |
     MERGE (f:StateFrontier {
-        graph_id: $session_id,
-        crawl_session_id: $crawl_session_id,
+        graph_id: $graph_id,
+        session_id: $session_id,
         state_hash: $state_hash
     })
     ON CREATE SET
@@ -64,8 +64,8 @@ RETURN created
 """
 
 CLAIM_NEXT_PENDING_STATE = """
-MATCH (f:StateFrontier {graph_id: $session_id, crawl_session_id: $crawl_session_id, status: 'pending'})
-MATCH (s:State {graph_id: $session_id, state_hash: f.state_hash})
+MATCH (f:StateFrontier {graph_id: $graph_id, session_id: $session_id, status: 'pending'})
+MATCH (s:State {graph_id: $graph_id, state_hash: f.state_hash})
 WITH f, s, properties(s) AS props
 ORDER BY coalesce(f.semantic_priority_penalty, 0.0) ASC,
          coalesce(f.order, props.first_seen, timestamp()) ASC
@@ -79,10 +79,10 @@ RETURN props.state_hash AS state_hash,
 """
 
 MARK_STATE_PENDING = """
-MATCH (s:State {graph_id: $session_id, state_hash: $state_hash})
+MATCH (s:State {graph_id: $graph_id, state_hash: $state_hash})
 MERGE (f:StateFrontier {
-    graph_id: $session_id,
-    crawl_session_id: $crawl_session_id,
+    graph_id: $graph_id,
+    session_id: $session_id,
     state_hash: $state_hash
 })
 ON CREATE SET
@@ -116,8 +116,8 @@ RETURN count(f) AS count
 
 MARK_STATE_EXPLORED = """
 MERGE (f:StateFrontier {
-    graph_id: $session_id,
-    crawl_session_id: $crawl_session_id,
+    graph_id: $graph_id,
+    session_id: $session_id,
     state_hash: $state_hash
 })
 SET f.status = 'explored',
@@ -126,10 +126,10 @@ SET f.status = 'explored',
 """
 
 SET_STATE_FRONTIER_PRIORITY = """
-MATCH (s:State {graph_id: $session_id, state_hash: $state_hash})
+MATCH (s:State {graph_id: $graph_id, state_hash: $state_hash})
 MERGE (f:StateFrontier {
-    graph_id: $session_id,
-    crawl_session_id: $crawl_session_id,
+    graph_id: $graph_id,
+    session_id: $session_id,
     state_hash: $state_hash
 })
 ON CREATE SET
@@ -150,14 +150,14 @@ RETURN count(f) AS count
 """
 
 SET_STATE_PROPS = """
-MATCH (s:State {graph_id: $session_id, state_hash: $state_hash})
+MATCH (s:State {graph_id: $graph_id, state_hash: $state_hash})
 SET s += $props
 """
 
 ADD_TRANSITION = """
-MATCH (source:State {graph_id: $session_id, state_hash: $source_hash})
-MATCH (target:State {graph_id: $session_id, state_hash: $target_hash})
-MERGE (source)-[t:TRANSITION {graph_id: $session_id, transition_id: $transition_id}]->(target)
+MATCH (source:State {graph_id: $graph_id, state_hash: $source_hash})
+MATCH (target:State {graph_id: $graph_id, state_hash: $target_hash})
+MERGE (source)-[t:TRANSITION {graph_id: $graph_id, transition_id: $transition_id}]->(target)
 ON CREATE SET t += $props, t.first_seen = timestamp(), t.last_seen = timestamp(), t._was_created = true
 ON MATCH SET t += $props, t.last_seen = timestamp(), t._was_created = false
 WITH t, t._was_created AS created
@@ -166,14 +166,13 @@ RETURN created
 """
 
 FIND_EQUIVALENT_TRANSITION = """
-MATCH (source:State {graph_id: $session_id, state_hash: $source_hash})
-MATCH (target:State {graph_id: $session_id, state_hash: $target_hash})
-MATCH (source)-[t:TRANSITION {graph_id: $session_id}]->(target)
+MATCH (source:State {graph_id: $graph_id, state_hash: $source_hash})
+MATCH (target:State {graph_id: $graph_id, state_hash: $target_hash})
+MATCH (source)-[t:TRANSITION {graph_id: $graph_id}]->(target)
 WITH properties(t) AS props
 WHERE props.action_stable_key = $action_stable_key
    OR (
-        coalesce(props.action_stable_key, '') = ''
-        AND props.action_type = $action_type
+        props.action_type = $action_type
         AND coalesce(props.action_value, '') = $action_value
         AND coalesce(props.locator_value, '') = $locator_value
    )
@@ -183,15 +182,15 @@ LIMIT 1
 """
 
 UPDATE_TRANSITION = """
-MATCH ()-[t:TRANSITION {graph_id: $session_id, transition_id: $transition_id}]->()
+MATCH ()-[t:TRANSITION {graph_id: $graph_id, transition_id: $transition_id}]->()
 SET t += $props,
     t.last_seen = timestamp()
 """
 
 MARK_ACTION_ATTEMPTED = """
 MERGE (a:ActionAttempt {
-    graph_id: $session_id,
-    crawl_session_id: $crawl_session_id,
+    graph_id: $graph_id,
+    session_id: $session_id,
     state_hash: $state_hash,
     attempt_fingerprint: $attempt_fingerprint
 })
@@ -204,8 +203,8 @@ RETURN created
 
 TRY_INCREMENT_ACTION_REPEAT = """
 MERGE (c:ActionRepeatCounter {
-    graph_id: $session_id,
-    crawl_session_id: $crawl_session_id,
+    graph_id: $graph_id,
+    session_id: $session_id,
     scope: $scope,
     action_key: $action_key
 })
@@ -218,7 +217,7 @@ RETURN c.count AS count
 """
 
 UPSERT_REPLAY_INFO_IF_BETTER = """
-MATCH (s:State {graph_id: $session_id, state_hash: $state_hash})
+MATCH (s:State {graph_id: $graph_id, state_hash: $state_hash})
 WITH s, properties(s) AS props
 WITH s,
      coalesce(props.replay_score_self_checkpoint, 999999) AS old_self,
@@ -241,7 +240,7 @@ RETURN count(s) AS count
 """
 
 GET_REPLAY_INFO = """
-MATCH (s:State {graph_id: $session_id, state_hash: $state_hash})
+MATCH (s:State {graph_id: $graph_id, state_hash: $state_hash})
 WITH properties(s) AS props
 RETURN props.checkpoint_url AS checkpoint_url,
        props.checkpoint_state_hash AS checkpoint_state_hash,
@@ -255,7 +254,7 @@ RETURN props.checkpoint_url AS checkpoint_url,
 """
 
 ADD_DEFERRED_WORK = """
-MERGE (d:DeferredWork {graph_id: $session_id, crawl_session_id: $crawl_session_id, work_id: $work_id})
+MERGE (d:DeferredWork {graph_id: $graph_id, session_id: $session_id, work_id: $work_id})
 ON CREATE SET
     d.source_state_hash = $source_state_hash,
     d.actions_json = $actions_json,
@@ -266,7 +265,7 @@ RETURN d.status AS status
 """
 
 CLAIM_DEFERRED_WORK = """
-MATCH (d:DeferredWork {graph_id: $session_id, crawl_session_id: $crawl_session_id, status: 'pending'})
+MATCH (d:DeferredWork {graph_id: $graph_id, session_id: $session_id, status: 'pending'})
 WITH d
 ORDER BY d.created_at ASC
 LIMIT 1
@@ -279,28 +278,28 @@ RETURN d.work_id AS work_id,
 """
 
 MARK_DEFERRED_WORK_PROCESSED = """
-MATCH (d:DeferredWork {graph_id: $session_id, crawl_session_id: $crawl_session_id, work_id: $work_id})
+MATCH (d:DeferredWork {graph_id: $graph_id, session_id: $session_id, work_id: $work_id})
 SET d.status = 'processed',
     d.processed_at = timestamp()
 """
 
 UPSERT_SEMANTIC_PROFILE = """
-MERGE (p:SemanticProfile {graph_id: $session_id, state_hash: $state_hash})
+MERGE (p:SemanticProfile {graph_id: $graph_id, state_hash: $state_hash})
 ON CREATE SET p.created_at = timestamp()
 SET p.payload_json = $payload_json,
     p.updated_at = timestamp()
 """
 
 GET_SEMANTIC_PROFILE = """
-MATCH (p:SemanticProfile {graph_id: $session_id, state_hash: $state_hash})
+MATCH (p:SemanticProfile {graph_id: $graph_id, state_hash: $state_hash})
 RETURN properties(p).payload_json AS payload_json
 """
 
 ITER_SEMANTIC_PROFILES = """
-MATCH (p:SemanticProfile {graph_id: $session_id})
+MATCH (p:SemanticProfile {graph_id: $graph_id})
 MATCH (f:StateFrontier {
-    graph_id: $session_id,
-    crawl_session_id: $crawl_session_id,
+    graph_id: $graph_id,
+    session_id: $session_id,
     state_hash: p.state_hash
 })
 WHERE p.state_hash <> $state_hash
@@ -312,8 +311,8 @@ LIMIT $limit
 """
 
 GET_GRAPH = """
-MATCH (s:State {graph_id: $session_id})
-OPTIONAL MATCH (s)-[t:TRANSITION {graph_id: $session_id}]->(target:State)
+MATCH (s:State {graph_id: $graph_id})
+OPTIONAL MATCH (s)-[t:TRANSITION {graph_id: $graph_id}]->(target:State)
 RETURN collect(DISTINCT s) AS states,
 collect(DISTINCT {
     transition_id: properties(t).transition_id,
@@ -326,7 +325,7 @@ collect(DISTINCT {
 """
 
 GET_ACTIONS = """
-MATCH (s:State {graph_id: $session_id, state_hash: $state_hash})-[t:TRANSITION {graph_id: $session_id}]->(target:State)
+MATCH (s:State {graph_id: $graph_id, state_hash: $state_hash})-[t:TRANSITION {graph_id: $graph_id}]->(target:State)
 WITH properties(t) AS t_props, properties(target) AS target_props
 RETURN t_props.transition_id AS transition_id,
 target_props.state_hash AS target_state_hash,
@@ -339,7 +338,7 @@ t_props.action_fingerprint AS action_fingerprint
 
 CLEAR_SESSION = """
 MATCH (n)
-WHERE n.graph_id = $session_id
+WHERE n.graph_id = $graph_id
   AND (
     n:State
     OR n:StateFrontier
@@ -352,8 +351,8 @@ DETACH DELETE n
 """
 
 GET_LIGHTWEIGHT_FLOW_GRAPH = """
-MATCH (s:State {graph_id: $session_id})
-OPTIONAL MATCH (s)-[t:TRANSITION {graph_id: $session_id}]->(target:State {graph_id: $session_id})
+MATCH (s:State {graph_id: $graph_id})
+OPTIONAL MATCH (s)-[t:TRANSITION {graph_id: $graph_id}]->(target:State {graph_id: $graph_id})
 WITH
     collect(DISTINCT {
         state_hash: s.state_hash,
@@ -375,25 +374,25 @@ RETURN
 
 GET_CRAWL_PROGRESS = """
 CALL {
-    MATCH (s:State {graph_id: $session_id})
+    MATCH (s:State {graph_id: $graph_id})
     RETURN count(s) AS state_count
 }
 CALL {
-    MATCH ()-[t:TRANSITION {graph_id: $session_id}]->()
+    MATCH ()-[t:TRANSITION {graph_id: $graph_id}]->()
     RETURN count(t) AS transition_count
 }
 CALL {
     MATCH (f:StateFrontier {
-        graph_id: $session_id,
-        crawl_session_id: $crawl_session_id,
+        graph_id: $graph_id,
+        session_id: $session_id,
         status: 'pending'
     })
     RETURN count(f) AS pending_state_count
 }
 CALL {
     MATCH (d:DeferredWork {
-        graph_id: $session_id,
-        crawl_session_id: $crawl_session_id,
+        graph_id: $graph_id,
+        session_id: $session_id,
         status: 'pending'
     })
     RETURN count(d) AS pending_deferred_count
@@ -405,7 +404,7 @@ RETURN state_count,
 """
 
 GET_DATA_FROM_FLOW_QUERY = """
-MATCH (s:State {graph_id: $session_id, state_hash: $checkpoint_hash})
+MATCH (s:State {graph_id: $graph_id, state_hash: $checkpoint_hash})
 WITH properties(s) AS s_props,
      $transition_refs AS refs
 UNWIND range(0, size(refs) - 1) AS idx
@@ -413,7 +412,7 @@ WITH s_props.checkpoint_url AS checkpoint_url,
      s_props.checkpoint_storage_state_json AS checkpoint_storage_state_json,
      idx,
      refs[idx] AS ref
-MATCH (source:State)-[t:TRANSITION {graph_id: $session_id, transition_id: ref}]->(target:State)
+MATCH (source:State)-[t:TRANSITION {graph_id: $graph_id, transition_id: ref}]->(target:State)
 WITH checkpoint_url,
      checkpoint_storage_state_json,
      idx,
@@ -438,21 +437,24 @@ RETURN checkpoint_url,
 
 VERIFY_BDD_FLOW = """
 MATCH (checkpoint:State {
-    session_id: $crawl_session_id,
+    graph_id: $graph_id,
     state_hash: $checkpoint_hash
 })
+WHERE $session_id = ''
+   OR checkpoint.session_id = $session_id
+   OR $session_id IN coalesce(checkpoint.session_ids, [])
 WITH checkpoint,
      $transition_refs AS refs
 UNWIND range(0, size(refs) - 1) AS idx
 WITH checkpoint,
      idx,
      refs[idx] AS ref
-MATCH (source:State {session_id: $crawl_session_id})
+MATCH (source:State {graph_id: $graph_id})
       -[transition:TRANSITION {
-          session_id: $crawl_session_id,
+          graph_id: $graph_id,
           transition_id: ref
       }]->
-      (target:State {session_id: $crawl_session_id})
+      (target:State {graph_id: $graph_id})
 RETURN checkpoint.state_hash AS checkpoint_hash,
        collect({
          order: idx,

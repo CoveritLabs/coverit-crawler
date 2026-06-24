@@ -23,6 +23,7 @@ class CrawlSessionBase:
         base_url: str,
         graph_builder,
         config_path: str | None = None,
+        graph_id: str | None = None,
         session_id: str | None = None,
         headless: bool | None = None,
         max_states: int | None = None,
@@ -30,7 +31,6 @@ class CrawlSessionBase:
         timeout_ms: int | None = None,
         input_defaults: dict | None = None,
         *,
-        crawl_session_id: str | None = None,
         browser: BrowserEngine | None = None,
         browser_runtime: BrowserRuntime | None = None,
         settings: Config = config,
@@ -50,8 +50,8 @@ class CrawlSessionBase:
         self.headless = settings.HEADLESS if headless is None else headless
         self.config_path = config_path
         self._input_defaults = input_defaults
+        self.graph_id = graph_id or str(uuid4())
         self.session_id = session_id or str(uuid4())
-        self.crawl_session_id = crawl_session_id or self.session_id
 
         self._risk = risk_classifier or RiskClassifier.from_settings(settings)
         self._login_attempts = 0
@@ -95,8 +95,8 @@ class CrawlSessionBase:
             uncertainty_margin=self._settings.SEMANTIC_UNCERTAINTY_MARGIN,
             max_bank_size=self._settings.SEMANTIC_MAX_BANK_SIZE,
             graph_store=self.graph_builder,
+            graph_id=self.graph_id,
             session_id=self.session_id,
-            crawl_session_id=self.crawl_session_id,
         )
         self.executor = EventExecutor(
             self.browser,
@@ -108,7 +108,7 @@ class CrawlSessionBase:
             self.browser,
             self.executor,
             self.graph_builder,
-            self.session_id,
+            self.graph_id,
             self._settings,
         )
 
@@ -134,10 +134,10 @@ class CrawlSessionBase:
     ) -> bool:
         await self._wait_permission()
         created = await self.graph_builder.add_state(
-            self.session_id,
+            self.graph_id,
             state,
             enqueue=enqueue,
-            crawl_session_id=self.crawl_session_id,
+            session_id=self.session_id,
             semantic_priority_penalty=semantic_priority_penalty,
             matched_state_hash=matched_state_hash,
             confidence=confidence,
@@ -151,7 +151,7 @@ class CrawlSessionBase:
 
     async def get_next_state(self) -> AbstractState | None:
         await self._wait_permission()
-        return await self.graph_builder.claim_next_pending_state(self.session_id, crawl_session_id=self.crawl_session_id)
+        return await self.graph_builder.claim_next_pending_state(self.graph_id, session_id=self.session_id)
 
     async def add_transition(self, transition: AbstractTransition) -> None:
         await self._wait_permission()
@@ -194,8 +194,8 @@ class CrawlSessionBase:
 
                 if self._settings.DEFER_DESTRUCTIVE_ACTIONS:
                     item = await self.graph_builder.claim_deferred_work(
-                        self.session_id,
-                        crawl_session_id=self.crawl_session_id,
+                        self.graph_id,
+                        session_id=self.session_id,
                     )
                     if item:
                         await self._run_deferred_item(item)
@@ -204,9 +204,9 @@ class CrawlSessionBase:
                 break
 
             if self._slice_expired():
-                logger.info("Crawl slice deadline reached; yielding session %s", self.crawl_session_id)
+                logger.info("Crawl slice deadline reached; yielding session %s", self.session_id)
             elif self._stop_requested_now():
-                logger.info("Crawl stop requested; yielding session %s", self.crawl_session_id)
+                logger.info("Crawl stop requested; yielding session %s", self.session_id)
 
             logger.info(f"Crawl complete. States: {self._state_count}, Transitions: {self._transition_count}")
         except Exception as e:
@@ -251,9 +251,9 @@ class CrawlSessionBase:
             reached = await self._execute_action_sequence(initial_state, info, login_actions)
             if not reached:
                 await self.graph_builder.mark_state_pending(
-                    self.session_id,
+                    self.graph_id,
                     initial_state.state_hash,
-                    crawl_session_id=self.crawl_session_id,
+                    session_id=self.session_id,
                 )
 
     async def _plan_login_actions(self) -> list[CrawlAction] | None:
@@ -294,7 +294,7 @@ class CrawlSessionBase:
         state.metadata["is_login_state"] = True
 
         await self.graph_builder.set_state_properties(
-            self.session_id,
+            self.graph_id,
             state.state_hash,
             {"is_login_state": True},
         )

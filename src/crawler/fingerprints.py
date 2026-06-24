@@ -59,13 +59,13 @@ def action_key_fingerprint(action: CrawlAction) -> str:
 
 def transition_fingerprint(
     *,
-    session_id: str,
+    graph_id: str,
     source_state_hash: str,
     target_state_hash: str,
     action: CrawlAction,
 ) -> str:
     payload: dict[str, Any] = {
-        "session_id": session_id,
+        "graph_id": graph_id,
         "source": source_state_hash,
         "target": target_state_hash,
         "action": action_identity_payload(action),

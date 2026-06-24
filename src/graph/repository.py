@@ -106,11 +106,11 @@ class GraphRepository:
 
     async def add_state(
         self,
-        session_id: str,
+        graph_id: str,
         state: AbstractState,
         *,
         enqueue: bool = True,
-        crawl_session_id: str = "",
+        session_id: str = "",
         semantic_priority_penalty: float | None = None,
         matched_state_hash: str = "",
         confidence: float | None = None,
@@ -120,13 +120,13 @@ class GraphRepository:
         async with self._driver.session() as session:
             result = await session.run(
                 ADD_STATE,
-                session_id=session_id,
+                graph_id=graph_id,
                 state_hash=state.state_hash,
                 url=state.url,
                 title=state.title,
                 html=state.html,
                 enqueue=enqueue,
-                crawl_session_id=crawl_session_id,
+                session_id=session_id,
                 **self._frontier_priority_params(
                     semantic_priority_penalty=semantic_priority_penalty,
                     matched_state_hash=matched_state_hash,
@@ -140,10 +140,10 @@ class GraphRepository:
 
     async def mark_state_pending(
         self,
-        session_id: str,
+        graph_id: str,
         state_hash: str,
         *,
-        crawl_session_id: str = "",
+        session_id: str = "",
         semantic_priority_penalty: float | None = None,
         matched_state_hash: str = "",
         confidence: float | None = None,
@@ -153,8 +153,8 @@ class GraphRepository:
         async with self._driver.session() as session:
             result = await session.run(
                 MARK_STATE_PENDING,
+                graph_id=graph_id,
                 session_id=session_id,
-                crawl_session_id=crawl_session_id,
                 state_hash=state_hash,
                 **self._frontier_priority_params(
                     semantic_priority_penalty=semantic_priority_penalty,
@@ -167,12 +167,12 @@ class GraphRepository:
             record = await result.single()
             return bool(record and int(record.get("count", 0)) > 0)
 
-    async def claim_next_pending_state(self, session_id: str, *, crawl_session_id: str = "") -> AbstractState | None:
+    async def claim_next_pending_state(self, graph_id: str, *, session_id: str = "") -> AbstractState | None:
         async with self._driver.session() as session:
             result = await session.run(
                 CLAIM_NEXT_PENDING_STATE,
+                graph_id=graph_id,
                 session_id=session_id,
-                crawl_session_id=crawl_session_id,
             )
             record = await result.single()
             if not record:
@@ -184,21 +184,21 @@ class GraphRepository:
                 html="",
             )
 
-    async def mark_state_explored(self, session_id: str, state_hash: str, *, crawl_session_id: str = "") -> None:
+    async def mark_state_explored(self, graph_id: str, state_hash: str, *, session_id: str = "") -> None:
         async with self._driver.session() as session:
             await session.run(
                 MARK_STATE_EXPLORED,
+                graph_id=graph_id,
                 session_id=session_id,
-                crawl_session_id=crawl_session_id,
                 state_hash=state_hash,
             )
 
     async def set_state_frontier_priority(
         self,
-        session_id: str,
+        graph_id: str,
         state_hash: str,
         *,
-        crawl_session_id: str = "",
+        session_id: str = "",
         semantic_priority_penalty: float = 0.0,
         matched_state_hash: str = "",
         confidence: float = 0.0,
@@ -208,8 +208,8 @@ class GraphRepository:
         async with self._driver.session() as session:
             result = await session.run(
                 SET_STATE_FRONTIER_PRIORITY,
+                graph_id=graph_id,
                 session_id=session_id,
-                crawl_session_id=crawl_session_id,
                 state_hash=state_hash,
                 semantic_priority_penalty=float(semantic_priority_penalty),
                 matched_state_hash=matched_state_hash,
@@ -220,11 +220,11 @@ class GraphRepository:
             record = await result.single()
             return bool(record and int(record.get("count", 0)) > 0)
 
-    async def set_state_properties(self, session_id: str, state_hash: str, props: dict) -> None:
+    async def set_state_properties(self, graph_id: str, state_hash: str, props: dict) -> None:
         async with self._driver.session() as session:
             await session.run(
                 SET_STATE_PROPS,
-                session_id=session_id,
+                graph_id=graph_id,
                 state_hash=state_hash,
                 props=self._normalize_props(props),
             )
@@ -233,7 +233,7 @@ class GraphRepository:
         props = {
             "action_type": t.action_type,
             "action_description": t.action_description,
-            "session_id": t.crawl_session_id,
+            "session_id": t.session_id,
             "locator_id": str(t.locator_id),
             "locator_value": t.locator_value,
             "action_value": t.action_value,
@@ -244,7 +244,7 @@ class GraphRepository:
         async with self._driver.session() as session:
             existing = await session.run(
                 FIND_EQUIVALENT_TRANSITION,
-                session_id=t.session_id,
+                graph_id=t.graph_id,
                 source_hash=t.source_state_hash,
                 target_hash=t.target_state_hash,
                 action_stable_key=t.action_stable_key,
@@ -254,17 +254,21 @@ class GraphRepository:
             )
             existing_record = await existing.single()
             if existing_record and existing_record.get("transition_id"):
+                canonical_transition_id = str(existing_record["transition_id"])
+                t.transition_id = canonical_transition_id
+                t.action_fingerprint = canonical_transition_id
+                props["action_fingerprint"] = canonical_transition_id
                 await session.run(
                     UPDATE_TRANSITION,
-                    session_id=t.session_id,
-                    transition_id=str(existing_record["transition_id"]),
+                    graph_id=t.graph_id,
+                    transition_id=canonical_transition_id,
                     props=self._normalize_props(props),
                 )
                 return False
 
             result = await session.run(
                 ADD_TRANSITION,
-                session_id=t.session_id,
+                graph_id=t.graph_id,
                 source_hash=t.source_state_hash,
                 target_hash=t.target_state_hash,
                 transition_id=t.transition_id,
@@ -275,17 +279,17 @@ class GraphRepository:
 
     async def mark_action_attempted(
         self,
-        session_id: str,
+        graph_id: str,
         state_hash: str,
         attempt_fingerprint: str,
         *,
-        crawl_session_id: str = "",
+        session_id: str = "",
     ) -> bool:
         async with self._driver.session() as session:
             result = await session.run(
                 MARK_ACTION_ATTEMPTED,
+                graph_id=graph_id,
                 session_id=session_id,
-                crawl_session_id=crawl_session_id,
                 state_hash=state_hash,
                 attempt_fingerprint=attempt_fingerprint,
             )
@@ -294,9 +298,9 @@ class GraphRepository:
 
     async def try_increment_action_repeat(
         self,
-        session_id: str,
+        graph_id: str,
         *,
-        crawl_session_id: str = "",
+        session_id: str = "",
         scope: str,
         action_key: str,
         max_repeats: int,
@@ -306,8 +310,8 @@ class GraphRepository:
         async with self._driver.session() as session:
             result = await session.run(
                 TRY_INCREMENT_ACTION_REPEAT,
+                graph_id=graph_id,
                 session_id=session_id,
-                crawl_session_id=crawl_session_id,
                 scope=scope,
                 action_key=action_key,
                 max_repeats=int(max_repeats),
@@ -317,7 +321,7 @@ class GraphRepository:
 
     async def upsert_replay_info_if_better(
         self,
-        session_id: str,
+        graph_id: str,
         state_hash: str,
         props: dict[str, Any],
         score: list[Any],
@@ -326,7 +330,7 @@ class GraphRepository:
         async with self._driver.session() as session:
             result = await session.run(
                 UPSERT_REPLAY_INFO_IF_BETTER,
-                session_id=session_id,
+                graph_id=graph_id,
                 state_hash=state_hash,
                 props=self._normalize_props(props),
                 score_self_checkpoint=int(score_values[0]),
@@ -338,11 +342,11 @@ class GraphRepository:
             record = await result.single()
             return bool(record and int(record.get("count", 0)) > 0)
 
-    async def get_replay_info(self, session_id: str, state_hash: str) -> dict[str, Any] | None:
+    async def get_replay_info(self, graph_id: str, state_hash: str) -> dict[str, Any] | None:
         async with self._driver.session() as session:
             result = await session.run(
                 GET_REPLAY_INFO,
-                session_id=session_id,
+                graph_id=graph_id,
                 state_hash=state_hash,
             )
             record = await result.single()
@@ -350,9 +354,9 @@ class GraphRepository:
 
     async def add_deferred_work(
         self,
-        session_id: str,
+        graph_id: str,
         *,
-        crawl_session_id: str = "",
+        session_id: str = "",
         work_id: str,
         source_state_hash: str,
         actions_json: str,
@@ -361,52 +365,52 @@ class GraphRepository:
         async with self._driver.session() as session:
             await session.run(
                 ADD_DEFERRED_WORK,
+                graph_id=graph_id,
                 session_id=session_id,
-                crawl_session_id=crawl_session_id,
                 work_id=work_id,
                 source_state_hash=source_state_hash,
                 actions_json=actions_json,
                 element_json=element_json,
             )
 
-    async def claim_deferred_work(self, session_id: str, *, crawl_session_id: str = "") -> dict[str, Any] | None:
+    async def claim_deferred_work(self, graph_id: str, *, session_id: str = "") -> dict[str, Any] | None:
         async with self._driver.session() as session:
             result = await session.run(
                 CLAIM_DEFERRED_WORK,
+                graph_id=graph_id,
                 session_id=session_id,
-                crawl_session_id=crawl_session_id,
             )
             record = await result.single()
             return record.data() if record else None
 
-    async def mark_deferred_work_processed(self, session_id: str, work_id: str, *, crawl_session_id: str = "") -> None:
+    async def mark_deferred_work_processed(self, graph_id: str, work_id: str, *, session_id: str = "") -> None:
         async with self._driver.session() as session:
             await session.run(
                 MARK_DEFERRED_WORK_PROCESSED,
+                graph_id=graph_id,
                 session_id=session_id,
-                crawl_session_id=crawl_session_id,
                 work_id=work_id,
             )
 
     async def upsert_semantic_profile(
         self,
-        session_id: str,
+        graph_id: str,
         state_hash: str,
         payload: dict[str, Any],
     ) -> None:
         async with self._driver.session() as session:
             await session.run(
                 UPSERT_SEMANTIC_PROFILE,
-                session_id=session_id,
+                graph_id=graph_id,
                 state_hash=state_hash,
                 payload_json=stable_json_dumps(payload),
             )
 
-    async def get_semantic_profile(self, session_id: str, state_hash: str) -> dict[str, Any] | None:
+    async def get_semantic_profile(self, graph_id: str, state_hash: str) -> dict[str, Any] | None:
         async with self._driver.session() as session:
             result = await session.run(
                 GET_SEMANTIC_PROFILE,
-                session_id=session_id,
+                graph_id=graph_id,
                 state_hash=state_hash,
             )
             record = await result.single()
@@ -419,11 +423,11 @@ class GraphRepository:
 
     async def iter_semantic_profiles(
         self,
-        session_id: str,
+        graph_id: str,
         *,
         state_hash: str,
         batch_size: int,
-        crawl_session_id: str = "",
+        session_id: str = "",
         frontier_statuses: list[str] | None = None,
     ):
         statuses = frontier_statuses or ["exploring", "explored"]
@@ -432,8 +436,8 @@ class GraphRepository:
             async with self._driver.session() as session:
                 result = await session.run(
                     ITER_SEMANTIC_PROFILES,
+                    graph_id=graph_id,
                     session_id=session_id,
-                    crawl_session_id=crawl_session_id,
                     frontier_statuses=statuses,
                     state_hash=state_hash,
                     skip=skip,
@@ -455,39 +459,39 @@ class GraphRepository:
                 break
             skip += batch_size
 
-    async def get_state_graph(self, session_id: str) -> dict:
+    async def get_state_graph(self, graph_id: str) -> dict:
         async with self._driver.session() as session:
-            result = await session.run(GET_GRAPH, session_id=session_id)
+            result = await session.run(GET_GRAPH, graph_id=graph_id)
             record = await result.single()
             return record.data() if record else {"states": [], "transitions": []}
 
-    async def get_available_actions(self, session_id: str, state_hash: str) -> list[dict]:
+    async def get_available_actions(self, graph_id: str, state_hash: str) -> list[dict]:
         async with self._driver.session() as session:
             result = await session.run(
                 GET_ACTIONS,
-                session_id=session_id,
+                graph_id=graph_id,
                 state_hash=state_hash,
             )
             return [r.data() for r in await result.fetch(100)]
 
-    async def clear_session_data(self, session_id: str) -> None:
+    async def clear_session_data(self, graph_id: str) -> None:
         async with self._driver.session() as session:
-            await session.run(CLEAR_SESSION, session_id=session_id)
+            await session.run(CLEAR_SESSION, graph_id=graph_id)
 
-    async def get_lightweight_flow_graph(self, session_id: str) -> dict:
+    async def get_lightweight_flow_graph(self, graph_id: str) -> dict:
         async with self._driver.session() as session:
-            result = await session.run(GET_LIGHTWEIGHT_FLOW_GRAPH, session_id=session_id)
+            result = await session.run(GET_LIGHTWEIGHT_FLOW_GRAPH, graph_id=graph_id)
             record = await result.single()
             if not record:
                 return {"states": [], "transitions": []}
             return record.data()
 
-    async def get_crawl_progress(self, session_id: str, *, crawl_session_id: str = "") -> dict[str, int]:
+    async def get_crawl_progress(self, graph_id: str, *, session_id: str = "") -> dict[str, int]:
         async with self._driver.session() as session:
             result = await session.run(
                 GET_CRAWL_PROGRESS,
+                graph_id=graph_id,
                 session_id=session_id,
-                crawl_session_id=crawl_session_id,
             )
             record = await result.single()
             if not record:
@@ -506,14 +510,14 @@ class GraphRepository:
 
     async def get_data_from_flow_query(
         self,
-        session_id: str,
+        graph_id: str,
         checkpoint_hash: str,
         transition_refs: list[str],
     ) -> tuple[str | None, Any, list[dict[str, Any]]]:
         async with self._driver.session() as session:
             result = await session.run(
                 GET_DATA_FROM_FLOW_QUERY,
-                session_id=session_id,
+                graph_id=graph_id,
                 checkpoint_hash=checkpoint_hash,
                 transition_refs=transition_refs,
             )
@@ -527,7 +531,8 @@ class GraphRepository:
 
     async def verify_bdd_flow(
         self,
-        crawl_session_id: str,
+        graph_id: str,
+        session_id: str,
         checkpoint_hash: str,
         transition_refs: list[str],
     ) -> bool:
@@ -537,7 +542,8 @@ class GraphRepository:
         async with self._driver.session() as session:
             result = await session.run(
                 VERIFY_BDD_FLOW,
-                crawl_session_id=crawl_session_id,
+                graph_id=graph_id,
+                session_id=session_id,
                 checkpoint_hash=checkpoint_hash,
                 transition_refs=transition_refs,
             )

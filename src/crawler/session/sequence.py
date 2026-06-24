@@ -44,19 +44,19 @@ class CrawlSessionSequenceMixin:
         attempt_fp = action_attempt_fingerprint(source.state_hash, primary)
 
         if not await self.graph_builder.mark_action_attempted(
-            self.session_id,
+            self.graph_id,
             source.state_hash,
             attempt_fp,
-            crawl_session_id=self.crawl_session_id,
+            session_id=self.session_id,
         ):
             return None
 
         can_run = await self.graph_builder.try_increment_action_repeat(
-            self.session_id,
+            self.graph_id,
             scope=scope_url,
             action_key=action_key,
             max_repeats=int(getattr(self._settings, "MAX_ACTION_REPEATS_PER_URL", 2)),
-            crawl_session_id=self.crawl_session_id,
+            session_id=self.session_id,
         )
         if not can_run:
             return None
@@ -175,7 +175,7 @@ class CrawlSessionSequenceMixin:
         primary = actions[-1]
 
         fp = transition_fingerprint(
-            session_id=str(self.session_id),
+            graph_id=str(self.graph_id),
             source_state_hash=source.state_hash,
             target_state_hash=target.state_hash,
             action=primary,
@@ -184,8 +184,8 @@ class CrawlSessionSequenceMixin:
         locator_value = primary.selector or primary.value
 
         return AbstractTransition(
+            graph_id=str(self.graph_id),
             session_id=str(self.session_id),
-            crawl_session_id=str(self.crawl_session_id),
             transition_id=fp,
             source_state_hash=source.state_hash,
             target_state_hash=target.state_hash,
@@ -245,7 +245,7 @@ class CrawlSessionSequenceMixin:
     ) -> None:
         props = info.to_neo4j_props(state_hash=state_hash)
 
-        await self.graph_builder.set_state_properties(self.session_id, state_hash, props)
+        await self.graph_builder.set_state_properties(self.graph_id, state_hash, props)
 
         if not persist_storage_state:
             return
@@ -253,7 +253,7 @@ class CrawlSessionSequenceMixin:
         storage_state = await self.browser.export_storage_state()
 
         await self.graph_builder.set_state_properties(
-            self.session_id,
+            self.graph_id,
             state_hash,
             {"checkpoint_storage_state_json": storage_state},
         )
@@ -289,7 +289,7 @@ class CrawlSessionSequenceMixin:
         finally:
             if work_id:
                 await self.graph_builder.mark_deferred_work_processed(
-                    self.session_id,
+                    self.graph_id,
                     work_id,
-                    crawl_session_id=self.crawl_session_id,
+                    session_id=self.session_id,
                 )

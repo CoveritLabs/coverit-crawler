@@ -100,7 +100,7 @@ def _should_continue_crawl(progress: dict[str, Any], job: CrawlJob) -> bool:
 
 
 async def _crawl_progress(worker: Any, graph_id: str, session_id: str) -> dict[str, int]:
-    return await worker._graph_builder.get_crawl_progress(graph_id, crawl_session_id=session_id)
+    return await worker._graph_builder.get_crawl_progress(graph_id, session_id=session_id)
 
 
 async def _enqueue_continuation(ctx: dict, worker: Any, session_id: str) -> str:
