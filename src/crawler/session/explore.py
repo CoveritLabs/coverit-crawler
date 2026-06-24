@@ -49,9 +49,9 @@ class CrawlSessionExploreMixin:
             await self._explore_elements(current, current_info, state_elements)
         finally:
             await self.graph_builder.mark_state_explored(
-                self.session_id,
+                self.graph_id,
                 current.state_hash,
-                crawl_session_id=self.crawl_session_id,
+                session_id=self.session_id,
             )
 
     async def _explore_forms(
@@ -402,8 +402,8 @@ class CrawlSessionExploreMixin:
             }
         )
         await self.graph_builder.add_deferred_work(
-            self.session_id,
-            crawl_session_id=self.crawl_session_id,
+            self.graph_id,
+            session_id=self.session_id,
             work_id=hashlib.sha256(raw_id.encode("utf-8")).hexdigest(),
             source_state_hash=current.state_hash,
             actions_json=actions_json,

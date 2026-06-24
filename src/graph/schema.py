@@ -37,7 +37,7 @@ REQUIRE (p.graph_id, p.state_hash) IS UNIQUE
 FRONTIER_CONSTRAINT = """
 CREATE CONSTRAINT frontier_session_unique IF NOT EXISTS
 FOR (f:StateFrontier)
-REQUIRE (f.graph_id, f.crawl_session_id, f.state_hash) IS UNIQUE
+REQUIRE (f.graph_id, f.session_id, f.state_hash) IS UNIQUE
 """
 
 FRONTIER_CLAIM_INDEX = """
@@ -45,7 +45,7 @@ CREATE INDEX frontier_claim IF NOT EXISTS
 FOR (f:StateFrontier)
 ON (
     f.graph_id,
-    f.crawl_session_id,
+    f.session_id,
     f.status,
     f.semantic_priority_penalty,
     f.order
@@ -55,19 +55,19 @@ ON (
 ACTION_ATTEMPT_SESSION_CONSTRAINT = """
 CREATE CONSTRAINT action_attempt_session_unique IF NOT EXISTS
 FOR (a:ActionAttempt)
-REQUIRE (a.graph_id, a.crawl_session_id, a.state_hash, a.attempt_fingerprint) IS UNIQUE
+REQUIRE (a.graph_id, a.session_id, a.state_hash, a.attempt_fingerprint) IS UNIQUE
 """
 
 REPEAT_COUNTER_SESSION_CONSTRAINT = """
 CREATE CONSTRAINT action_repeat_counter_session_unique IF NOT EXISTS
 FOR (c:ActionRepeatCounter)
-REQUIRE (c.graph_id, c.crawl_session_id, c.scope, c.action_key) IS UNIQUE
+REQUIRE (c.graph_id, c.session_id, c.scope, c.action_key) IS UNIQUE
 """
 
 DEFERRED_WORK_SESSION_CONSTRAINT = """
 CREATE CONSTRAINT deferred_work_session_unique IF NOT EXISTS
 FOR (d:DeferredWork)
-REQUIRE (d.graph_id, d.crawl_session_id, d.work_id) IS UNIQUE
+REQUIRE (d.graph_id, d.session_id, d.work_id) IS UNIQUE
 """
 
 

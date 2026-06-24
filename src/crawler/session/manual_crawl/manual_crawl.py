@@ -1,8 +1,7 @@
 import asyncio
 import json
-import sys
 import logging
-from typing import List
+import sys
 
 from src.crawler.session.base import CrawlSessionBase
 from src.crawler.session.manual_crawl.recording_mapper import map_steps_to_actions
@@ -33,6 +32,7 @@ def _transition_is_labelable(transition) -> bool:
         transition.action_value
     )
 
+
 class ManualCrawlSession(CrawlSessionBase, CrawlSessionSequenceMixin):
     async def run_crawl(self):
         self._recording_state = False
@@ -40,7 +40,7 @@ class ManualCrawlSession(CrawlSessionBase, CrawlSessionSequenceMixin):
         self._recorded_transitions = []
         self._recorded_steps = []
         self._recorded_storage_state_json = []
-        self._recorded_states: List[AbstractState] = []
+        self._recorded_states: list[AbstractState] = []
         self._recording_start_idx = 0
 
         async def listen_for_input():
@@ -52,35 +52,35 @@ class ManualCrawlSession(CrawlSessionBase, CrawlSessionSequenceMixin):
             while not self._exit_session:
                 cmd = await loop.run_in_executor(None, sys.stdin.readline)
                 cmd = cmd.strip().lower()
-                if cmd == 's':
-                    if(self._recording_state):
+                if cmd == "s":
+                    if self._recording_state:
                         print("Already recording")
                     else:
                         print("Recording started")
                         self._recording_state = True
-                elif cmd == 'q':
+                elif cmd == "q":
                     self._exit_session = True
                     break
-                elif cmd == 'b':
+                elif cmd == "b":
                     print("Building bug graph from recorded session...")
                     await self.build_bug_graph()
                     print("Bug graph build complete.")
-                    
+
         listener_task = asyncio.create_task(listen_for_input())
 
         try:
             self.headless = False
             self.browser.headless = False
-            
+
             await self.initialize()
             context = self.browser._require_context()
-            
+
             await context.expose_function("__reportStep", lambda step: self._recorded_steps.append(step))
             await context.add_init_script(RECORDING_JS)
 
             await self.browser.navigate(self.base_url)
             await self.browser.wait_for_settle()
-            
+
             current_state = await self.browser.capture_state()
             self._recorded_states.append(current_state)
             self._recorded_storage_state_json.append(await self.browser.export_storage_state())
@@ -101,11 +101,11 @@ class ManualCrawlSession(CrawlSessionBase, CrawlSessionSequenceMixin):
 
                     new_state = await self.browser.capture_state()
 
-                    if(new_state.url != current_state.url and not self._recording_state):
+                    if new_state.url != current_state.url and not self._recording_state:
                         self._recording_start_idx = max(0, len(self._recorded_states) - 1)
-                    
+
                     self._recorded_storage_state_json.append(await self.browser.export_storage_state())
-                    
+
                     actions = [
                         action
                         for action in map_steps_to_actions(steps_to_process, fallback_url=current_state.url)
@@ -115,13 +115,13 @@ class ManualCrawlSession(CrawlSessionBase, CrawlSessionSequenceMixin):
                     if not actions:
                         current_state = new_state
                         continue
-                    
+
                     transition = self._build_transition(current_state, new_state, actions)
                     if not _transition_is_labelable(transition):
                         current_state = new_state
                         continue
                     self._recorded_transitions.append(transition)
-                    
+
                     logger.info(f"Generated Transition: {transition.action_description}")
                     current_state = new_state
 
@@ -132,40 +132,30 @@ class ManualCrawlSession(CrawlSessionBase, CrawlSessionSequenceMixin):
             print("Committing graph structure and cleaning up...")
             await self.build_recorded_graph()
             await self.cleanup()
-        
 
     async def build_recorded_graph(self) -> None:
         if not self._recorded_states:
             return
-            
-        start_idx = self._recording_start_idx if self._recording_start_idx is not None else 0
-        
-        await self._build_graph_starting_from(start_idx, is_bug_graph=False)
 
+        start_idx = self._recording_start_idx if self._recording_start_idx is not None else 0
+
+        await self._build_graph_starting_from(start_idx, is_bug_graph=False)
 
     async def build_bug_graph(self) -> None:
         await self._build_graph_starting_from(0, is_bug_graph=True)
 
-
     async def _build_graph_starting_from(self, start_idx: int, is_bug_graph: bool = False):
         if not self._recorded_states or start_idx >= len(self._recorded_states):
-            return {"final_state_hash": None,"transitions": [] }
+            return {"final_state_hash": None, "transitions": []}
 
-        last_state_hash = self._recorded_states[-1].state_hash
-        transition_refs = [
-            t.transition_id
-            for t in self._recorded_transitions[start_idx:]
-            if _transition_is_labelable(t)
-        ]    
-        
         for i in range(start_idx, len(self._recorded_states)):
             await self.add_to_queue(self._recorded_states[i])
             await self.graph_builder.set_state_properties(
-                self.session_id,
+                self.graph_id,
                 self._recorded_states[i].state_hash,
                 {"checkpoint_storage_state_json": self._recorded_storage_state_json[i]},
             )
-            
+
         for i in range(start_idx, len(self._recorded_transitions)):
             transition = self._recorded_transitions[i]
             if _transition_is_labelable(transition):

@@ -29,8 +29,8 @@ class AbstractState:
 class AbstractTransition:
     """Represents a transition between states."""
 
+    graph_id: str = ""
     session_id: str = ""
-    crawl_session_id: str = ""
     transition_id: str = ""
     source_state_hash: str = ""
     target_state_hash: str = ""

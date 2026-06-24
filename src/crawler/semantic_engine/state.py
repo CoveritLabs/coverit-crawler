@@ -246,8 +246,8 @@ class StateComparisonBank:
         uncertainty_margin: float,
         max_size: int,
         graph_store: Any | None = None,
+        graph_id: str | None = None,
         session_id: str | None = None,
-        crawl_session_id: str | None = None,
         batch_size: int = 100,
     ):
         self._profiler = profiler
@@ -256,8 +256,8 @@ class StateComparisonBank:
         self._uncertainty_margin = uncertainty_margin
         self._max_size = max(1, max_size)
         self._graph_store = graph_store
+        self._graph_id = graph_id
         self._session_id = session_id
-        self._crawl_session_id = crawl_session_id or session_id
         self._batch_size = max(1, int(batch_size))
         self._profiles: OrderedDict[str, StateSemanticProfile] = OrderedDict()
 
@@ -301,7 +301,7 @@ class StateComparisonBank:
         state_hash: str,
         elements: list[dict[str, Any]],
     ) -> StateComparisonResult:
-        if self._graph_store is not None and self._session_id:
+        if self._graph_store is not None and self._graph_id:
             return await self._register_persisted(state_hash, elements)
         return self._register_local(state_hash, elements)
 
@@ -311,11 +311,11 @@ class StateComparisonBank:
         elements: list[dict[str, Any]],
     ) -> StateComparisonResult:
         graph_store = self._graph_store
-        session_id = self._session_id
-        if graph_store is None or not session_id:
+        graph_id = self._graph_id
+        if graph_store is None or not graph_id:
             return self._register_local(state_hash, elements)
 
-        existing = await graph_store.get_semantic_profile(session_id, state_hash)
+        existing = await graph_store.get_semantic_profile(graph_id, state_hash)
         if existing is not None:
             return StateComparisonResult(
                 state_hash,
@@ -337,10 +337,10 @@ class StateComparisonBank:
         seen = 0
 
         async for payload in graph_store.iter_semantic_profiles(
-            session_id,
+            graph_id,
             state_hash=state_hash,
             batch_size=self._batch_size,
-            crawl_session_id=self._crawl_session_id or "",
+            session_id=self._session_id or "",
             frontier_statuses=["exploring", "explored"],
         ):
             known = StateSemanticProfile.from_payload(payload)
@@ -370,7 +370,7 @@ class StateComparisonBank:
                 else "high_similarity_equivalence"
             )
             await graph_store.upsert_semantic_profile(
-                session_id,
+                graph_id,
                 candidate.state_hash,
                 candidate.to_payload(),
             )
@@ -476,12 +476,12 @@ class StateComparisonBank:
         scores: dict[str, float] | None = None,
     ) -> StateComparisonResult:
         graph_store = self._graph_store
-        session_id = self._session_id
-        if graph_store is None or not session_id:
+        graph_id = self._graph_id
+        if graph_store is None or not graph_id:
             return self._accept(profile, reason, matched_hash, confidence, scores)
 
         await graph_store.upsert_semantic_profile(
-            session_id,
+            graph_id,
             profile.state_hash,
             profile.to_payload(),
         )

@@ -158,19 +158,18 @@ def _build_manual_transition(
     primary.metadata = dict(primary.metadata or {})
     digest = sequence_digest(actions)
     if unique_key:
-        digest = f"{digest}:{unique_key}"
         primary.metadata["manual_step_id"] = unique_key
     primary.metadata["sequence_digest"] = digest
     primary.metadata["sequence_len"] = len(actions)
     fp = transition_fingerprint(
-        session_id=graph_id,
+        graph_id=graph_id,
         source_state_hash=source.state_hash,
         target_state_hash=target.state_hash,
         action=primary,
     )
     return AbstractTransition(
-        session_id=graph_id,
-        crawl_session_id=session_id,
+        graph_id=graph_id,
+        session_id=session_id,
         transition_id=fp,
         source_state_hash=source.state_hash,
         target_state_hash=target.state_hash,
@@ -760,7 +759,7 @@ class ManualSegmentRecorder:
         target = self._states[target_index].state
         snapshot.target_index = target_index
         snapshot.transition = _build_manual_transition(
-            graph_id=self._session_id,
+            graph_id=self._graph_id,
             session_id=self._session_id,
             source=source,
             target=target,
@@ -829,7 +828,7 @@ class ManualSegmentRecorder:
 
         step_id = str(uuid4())
         transition = _build_manual_transition(
-            graph_id=self._session_id,
+            graph_id=self._graph_id,
             session_id=self._session_id,
             source=source,
             target=target,
@@ -897,7 +896,7 @@ class ManualSegmentRecorder:
             else _compact_manual_events([*snapshot.events, *display_events], display_safe=True)
         )
         snapshot.transition = _build_manual_transition(
-            graph_id=self._session_id,
+            graph_id=self._graph_id,
             session_id=self._session_id,
             source=source,
             target=target,
@@ -970,7 +969,7 @@ class ManualSegmentRecorder:
             source = self._states[snapshot.source_index].state
             target = self._states[snapshot.target_index].state
             snapshot.transition = _build_manual_transition(
-                graph_id=self._session_id,
+                graph_id=self._graph_id,
                 session_id=self._session_id,
                 source=source,
                 target=target,
@@ -1002,15 +1001,15 @@ class ManualSegmentRecorder:
 
     async def _persist_state_snapshot(self, snapshot: ManualStateSnapshot) -> None:
         created = await self._graph_builder.add_state(
-            self._session_id,
+            self._graph_id,
             snapshot.state,
             enqueue=False,
-            crawl_session_id=self._session_id,
+            session_id=self._session_id,
         )
         if created:
             self.state_count += 1
         await self._graph_builder.set_state_properties(
-            self._session_id,
+            self._graph_id,
             snapshot.state.state_hash,
             {
                 "checkpoint_url": snapshot.state.url,
@@ -1038,6 +1037,7 @@ class ManualSegmentRecorder:
             return True
         return bool(
             await verifier(
+                self._graph_id,
                 self._session_id,
                 self._checkpoint_hash,
                 transition_refs,
