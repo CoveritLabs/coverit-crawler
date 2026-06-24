@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from playwright.async_api import (
     Browser,
     BrowserContext,
+    Frame,
     Page,
     async_playwright,
 )
@@ -114,10 +115,17 @@ class BrowserEngine:
         frame_name: Optional[str] = None,
     ) -> None:
         target = self._frames.resolve(frame_url=frame_url, frame_name=frame_name)
+        click_timeout = min(self.timeout_ms, 5000)
+
+        async def action() -> None:
+            locator = target.locator(selector).first
+            await locator.wait_for(state="visible", timeout=self.timeout_ms)
+            await locator.click(timeout=click_timeout)
 
         await self._actions.retry(
-            lambda: target.click(selector, timeout=self.timeout_ms),
+            action,
             selector=selector,
+            fallback=lambda: self._click_actionable_point(target, selector),
         )
 
     async def type_text(
@@ -297,6 +305,23 @@ class BrowserEngine:
                 pass
 
         return urls
+
+    async def _click_actionable_point(self, target: Page | Frame, selector: str) -> None:
+        locator = target.locator(selector).first
+        await locator.scroll_into_view_if_needed(timeout=self.timeout_ms)
+
+        point = await locator.evaluate(self._js.load("find_actionable_click_point.js"))
+
+        if not point:
+            raise RuntimeError(f"No unobstructed click point found for {selector}")
+
+        box = await locator.bounding_box()
+
+        if not box:
+            raise RuntimeError(f"No bounding box found for {selector}")
+
+        page = self._require_page()
+        await page.mouse.click(box["x"] + point["x"], box["y"] + point["y"])
 
     async def _evaluate_js(self, js_code: str, *, retries: int = 1):
         page = self._require_page()

@@ -29,6 +29,53 @@
         return r.width > 0 && r.height > 0;
     };
 
+    const hasActionableViewportPoint = (el) => {
+        const doc = el.ownerDocument || document;
+        const view = doc.defaultView || window;
+        const rect = el.getBoundingClientRect();
+        const left = Math.max(rect.left, 0);
+        const top = Math.max(rect.top, 0);
+        const right = Math.min(rect.right, view.innerWidth || doc.documentElement.clientWidth || 0);
+        const bottom = Math.min(rect.bottom, view.innerHeight || doc.documentElement.clientHeight || 0);
+
+        if (left >= right || top >= bottom) {
+            return true;
+        }
+
+        const ownsHit = (hit) => {
+            if (!hit) return false;
+            if (hit === el || el.contains(hit)) return true;
+
+            const root = hit.getRootNode && hit.getRootNode();
+            const host = root && root.host;
+
+            return !!host && (host === el || el.contains(host));
+        };
+
+        const candidates = [
+            [0.5, 0.5],
+            [0.2, 0.5],
+            [0.8, 0.5],
+            [0.5, 0.2],
+            [0.5, 0.8],
+            [0.2, 0.2],
+            [0.8, 0.2],
+            [0.2, 0.8],
+            [0.8, 0.8],
+        ];
+
+        for (const [xRatio, yRatio] of candidates) {
+            const x = left + (right - left) * xRatio;
+            const y = top + (bottom - top) * yRatio;
+
+            if (ownsHit(doc.elementFromPoint(x, y))) {
+                return true;
+            }
+        }
+
+        return false;
+    };
+
     const labelFor = (doc, el) => {
         if (el.id) {
             const lbl = doc.querySelector(`label[for="${cssEscape(el.id)}"]`);
@@ -157,6 +204,7 @@
         const el = elements[i].el;
         const frame = elements[i].frame;
         if (!isVisible(el)) continue;
+        if (!hasActionableViewportPoint(el)) continue;
 
         const tag = el.tagName.toLowerCase();
         const type = (el.type || "").toLowerCase();
