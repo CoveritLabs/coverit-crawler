@@ -351,25 +351,31 @@ DETACH DELETE n
 """
 
 GET_LIGHTWEIGHT_FLOW_GRAPH = """
-MATCH (s:State {graph_id: $graph_id})
-OPTIONAL MATCH (s)-[t:TRANSITION {graph_id: $graph_id}]->(target:State {graph_id: $graph_id})
-WITH
+MATCH (s:State {graph_id: $session_id})
+WITH s ORDER BY s.first_seen ASC
+
+WITH collect(s) AS ordered_states
+WITH 
+    ordered_states[0].state_hash AS root_hash,
+    [state IN ordered_states WHERE state.is_login_state = true | state.state_hash][0] AS login_hash,
+    ordered_states
+
+UNWIND ordered_states AS s
+OPTIONAL MATCH (s)-[t:TRANSITION {graph_id: $session_id}]->(target:State {graph_id: $session_id})
+
+RETURN 
+    root_hash,
+    login_hash,
     collect(DISTINCT {
         state_hash: s.state_hash,
-        first_seen: s.first_seen,
-        is_checkpoint: s.is_checkpoint
+        is_checkpoint: s.is_checkpoint,
+        checkpoint_url: s.checkpoint_url
     }) AS states,
-    collect(DISTINCT CASE
-        WHEN t IS NULL OR target IS NULL THEN NULL
-        ELSE {
-            source_hash: s.state_hash,
-            target_hash: target.state_hash,
-            transition_id: t.transition_id
-        }
-    END) AS raw_transitions
-RETURN
-    states,
-    [transition IN raw_transitions WHERE transition IS NOT NULL] AS transitions
+    collect(CASE WHEN t IS NOT NULL THEN {
+        source_hash: s.state_hash,
+        target_hash: target.state_hash,
+        transition_id: t.transition_id
+    } END) AS transitions
 """
 
 GET_CRAWL_PROGRESS = """

@@ -483,7 +483,12 @@ class GraphRepository:
             result = await session.run(GET_LIGHTWEIGHT_FLOW_GRAPH, graph_id=graph_id)
             record = await result.single()
             if not record:
-                return {"states": [], "transitions": []}
+                return {
+                    "root_hash": None, 
+                    "login_hash": None, 
+                    "states": [], 
+                    "transitions": []
+                }
             return record.data()
 
     async def get_crawl_progress(self, graph_id: str, *, session_id: str = "") -> dict[str, int]:

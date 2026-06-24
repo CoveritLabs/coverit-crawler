@@ -42,7 +42,8 @@ async def run_find_all_flows(
 
         flows = await find_all_flows(
             graph_repo=graph,
-            session_id=graph_id,
+            session_id=session_id,
+            graph_id=graph_id,
             min_num_of_states_per_tf=min_num_of_states_per_tf,
             max_num_of_states_per_tf=max_num_of_states_per_tf,
             convergence_threshold=convergence_threshold,

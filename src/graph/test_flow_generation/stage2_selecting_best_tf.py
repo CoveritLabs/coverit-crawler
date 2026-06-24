@@ -16,8 +16,11 @@ def select_tfs(
     transition_count: int,
     convergence_threshold: float | None = None,
     min_num_of_tf: int | None = None,
+    max_num_of_tf: int | None = None,
     min_num_of_states_per_tf: int | None = None,
 ) -> list[TestFlow]:
+    max_num_of_tf=min(max_num_of_tf, MAX_TF_TAKEN) if max_num_of_tf is not None else MAX_TF_TAKEN
+    
     if transition_count <= 0:
         logger.warning("transition_count <= 0; nothing to cover")
         return []
@@ -26,8 +29,7 @@ def select_tfs(
     eligible_sets: list[set[str]] = []
 
     for tf in candidates:
-        length = tf.state_count
-        if min_num_of_states_per_tf is None or length >= min_num_of_states_per_tf:
+        if min_num_of_states_per_tf is None or len(tf) >= min_num_of_states_per_tf:
             eligible.append(tf)
             eligible_sets.append(set(tf.transition_ids))
 
@@ -41,7 +43,7 @@ def select_tfs(
     heap = [(-len(es), i) for i, es in enumerate(eligible_sets)]
     heapq.heapify(heap)
 
-    while heap and len(selected) < MAX_TF_TAKEN:
+    while heap:
         while heap:
             neg_gain, idx = heapq.heappop(heap)
             real_gain = len(eligible_sets[idx] - union_ids)
@@ -61,27 +63,25 @@ def select_tfs(
         selected.append(candidate)
         union_ids.update(candidate.transition_ids)
 
+        current_count = len(selected)
         current_coverage = len(union_ids) / transition_count
 
-        if min_num_of_tf is not None:
-            if len(selected) >= min_num_of_tf:
-                if convergence_threshold is None:
-                    break
-                elif current_coverage >= convergence_threshold:
-                    logger.info(
-                        "Target reached: within (%d) and coverage (%.2f%% >= %.2f%%)",
-                        len(selected),
-                        current_coverage * 100,
-                        convergence_threshold * 100,
-                    )
-                    break
-        else:
-            if convergence_threshold is not None and current_coverage >= convergence_threshold:
+        if max_num_of_tf is not None and current_count >= max_num_of_tf:
+            logger.info("Target reached: hit max_num_of_tf limit (%d)", max_num_of_tf)
+            break
+
+        if min_num_of_tf is not None and current_count < min_num_of_tf:
+            continue
+
+        if convergence_threshold is not None:
+            if current_coverage >= convergence_threshold:
                 logger.info(
-                    "Target reached: coverage %.2f%% >= %.2f%%",
-                    current_coverage * 100,
-                    convergence_threshold * 100,
+                    "Target reached: coverage %.2f%% >= %.2f%% (TFs: %d)", 
+                    current_coverage * 100, convergence_threshold * 100, current_count
                 )
+                break
+        else:
+            if min_num_of_tf is not None:
                 break
 
     logger.info(
