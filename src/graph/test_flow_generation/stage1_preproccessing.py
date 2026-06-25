@@ -208,7 +208,7 @@ class CandidateTFGenerator:
 
 
 
-    def append_login_to_tfs(self, *, login_hash: str | None, graph_repo,graph_id: str,session_id: str) -> list[TestFlow]:
+    async def append_login_to_tfs(self, *, login_hash: str | None, graph_repo,graph_id: str,session_id: str) -> list[TestFlow]:
         if not login_hash:
             logger.warning("No login_hash provided; skipping login prefixing")
             return self.candidates
@@ -250,7 +250,7 @@ class CandidateTFGenerator:
                 action_fingerprint=fp,
                 action_stable_key=action_key_fingerprint(action),
             )
-            graph_repo.add_transition(transition)
+            await graph_repo.add_transition(transition)
 
             """
             Prepend the login transition to the TestFlow.

@@ -49,7 +49,7 @@ async def find_all_flows(
 
     candidate_generator.append_checkpoints_to_tfs()
 
-    candidates = candidate_generator.append_login_to_tfs(login_hash=login_hash, graph_repo=graph_repo, graph_id=graph_id, session_id=session_id)
+    candidates = await candidate_generator.append_login_to_tfs(login_hash=login_hash, graph_repo=graph_repo, graph_id=graph_id, session_id=session_id)
 
     candidates = candidate_generator.get_candidate_tfs()
 
