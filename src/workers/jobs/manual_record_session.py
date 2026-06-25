@@ -338,52 +338,6 @@ def _compact_manual_events(
     return compacted
 
 
-def _pending_group_accepts_event(
-    pending_events: list[dict[str, Any]],
-    next_event: dict[str, Any],
-) -> bool:
-    next_selector = _event_selector(next_event)
-    if not next_selector or not _event_is_input_like(next_event):
-        return False
-
-    compacted = _compact_manual_events(pending_events, display_safe=False)
-    if not compacted:
-        return True
-
-    for event in compacted:
-        action = _event_action(event)
-        if action != "click" and not _event_is_input_like(event):
-            return False
-        if _event_selector(event) != next_selector:
-            return False
-
-    return True
-
-
-def _pending_flush_reason_before_event(
-    pending_events: list[dict[str, Any]],
-    next_event: dict[str, Any],
-) -> str:
-    if not pending_events:
-        return ""
-
-    compacted = _compact_manual_events(pending_events, display_safe=False)
-    if not compacted:
-        return ""
-    if _pending_group_accepts_event(compacted, next_event):
-        return ""
-
-    pending_actions = ",".join(_event_action(event) or "unknown" for event in compacted)
-    next_action = _event_action(next_event) or "unknown"
-    pending_selectors = {
-        selector for selector in (_event_selector(event) for event in compacted) if selector
-    }
-    next_selector = _event_selector(next_event)
-    if len(pending_selectors) == 1 and next_selector in pending_selectors:
-        return f"action_boundary:{pending_actions}->{next_action}"
-    return f"selector_or_action_boundary:{pending_actions}->{next_action}"
-
-
 def _action_value_is_docgen_safe(value: Any) -> bool:
     if isinstance(value, str):
         if not value.strip():
@@ -544,13 +498,6 @@ class ManualSegmentRecorder:
         if self._last_browser_input_at <= 0:
             return False
         return (time.monotonic() - self._last_browser_input_at) < PENDING_EVENT_FLUSH_SECONDS
-
-    async def flush_reason_before_event(self, event: dict[str, Any]) -> tuple[str, int]:
-        async with self._lock:
-            return (
-                _pending_flush_reason_before_event(self._pending_events, event),
-                len(self._pending_events),
-            )
 
     async def initialize(self) -> None:
         async with self._lock:
@@ -1293,25 +1240,6 @@ async def _event_sender(
         event = await event_queue.get()
         should_emit = True
         if recorder is not None:
-            if step_queue is not None:
-                reason, pending_count = await recorder.flush_reason_before_event(event)
-                if reason:
-                    logger.info(
-                        "Manual recorder pre-flushing pending events session=%s reason=%s pending_count=%s next_event=%s",
-                        event.get("sessionId") or "",
-                        reason,
-                        pending_count,
-                        _log_event_summary(event),
-                    )
-                    steps = await recorder.flush_current_state(force_pending=True)
-                    logger.info(
-                        "Manual recorder pre-flush produced steps session=%s reason=%s step_count=%s",
-                        event.get("sessionId") or "",
-                        reason,
-                        len(steps),
-                    )
-                    for step in steps:
-                        await step_queue.put(step)
             should_emit = await recorder.record_event(event)
         logger.info(
             "Manual recorder received event session=%s emit=%s event=%s",
