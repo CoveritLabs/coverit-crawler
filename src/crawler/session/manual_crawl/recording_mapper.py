@@ -42,6 +42,9 @@ def _map_step(step: dict[str, Any]) -> CrawlAction | None:
     if action_type == "click":
         return _map_click(step, selector)
 
+    if action_type == "hover":
+        return _map_hover(step, selector)
+
     if action_type in {"input", "change"}:
         return _map_input(step, selector)
 
@@ -140,6 +143,31 @@ def _map_click(step: dict[str, Any], selector: str) -> CrawlAction | None:
             "selector_candidates": _selector_candidates(step),
             "target_selector": step.get("targetSelector") or step.get("target_selector") or "",
             "target_tag": step.get("targetTag") or step.get("target_tag") or "",
+        },
+    )
+
+
+def _map_hover(step: dict[str, Any], selector: str) -> CrawlAction | None:
+    if not selector:
+        return None
+
+    label = (
+        step.get("label")
+        or step.get("accessibleName")
+        or step.get("text")
+        or ""
+    ).strip()
+    tag = str(step.get("tag") or "").lower()
+    target = label or tag or "element"
+
+    return CrawlAction(
+        action_type="hover",
+        selector=selector,
+        value="",
+        description=f"Hover {target} [{selector}]",
+        metadata={
+            "manual": True,
+            "selector_candidates": _selector_candidates(step),
         },
     )
 
