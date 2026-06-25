@@ -35,20 +35,20 @@ class TopicClassifier(Protocol):
         ...
 
 
-class SklearnTopicClassifier:
+class ManualTopicClassifier:
     def __init__(
         self,
-        pipeline: Any,
+        model: Any,
         *,
         thresholds: dict[str, float] | None = None,
         default_threshold: float = 0.55,
         extractor: DOMFeatureExtractor | None = None,
     ):
-        self._pipeline = pipeline
+        self._model = model
         self._thresholds = thresholds or {}
         self._default_threshold = default_threshold
         self._extractor = extractor or DOMFeatureExtractor()
-        self._classes = tuple(canonical_topic(label) for label in pipeline.classes_)
+        self._classes = tuple(canonical_topic(label) for label in model.classes_)
 
     @property
     def classes(self) -> tuple[str, ...]:
@@ -59,7 +59,7 @@ class SklearnTopicClassifier:
         if not text:
             return TopicPrediction(None, 0.0, {}, True)
 
-        probabilities = self._pipeline.predict_proba([text])[0]
+        probabilities = self._model.predict_proba([text])[0]
         best_index = int(np.argmax(probabilities))
         topic = self._classes[best_index]
         confidence = float(probabilities[best_index])
