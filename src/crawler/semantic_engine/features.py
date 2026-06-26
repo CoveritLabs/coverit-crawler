@@ -28,19 +28,22 @@ class ElementFeatureEncoder(Protocol):
         ...
 
 
-class SklearnElementFeatureEncoder:
+class ManualElementFeatureEncoder:
     def __init__(
         self,
-        text_pipeline: Any,
+        text_encoder: Any,
         *,
         topic_classifier: TopicClassifier | None = None,
         extractor: DOMFeatureExtractor | None = None,
     ):
-        self._text_pipeline = text_pipeline
+        self._text_encoder = text_encoder
         self._topic_classifier = topic_classifier
         self._extractor = extractor or DOMFeatureExtractor()
-        probe = self.encode([{"tag": "input", "type": "text", "name": "probe"}])
-        self._dimension = int(probe.shape[1])
+        self._dimension = (
+            int(getattr(text_encoder, "dimension", 0))
+            + len(self._structural_vector({}))
+            + (len(topic_classifier.classes) if topic_classifier is not None else 0)
+        )
 
     @property
     def dimension(self) -> int:
@@ -52,10 +55,7 @@ class SklearnElementFeatureEncoder:
             return np.empty((0, dimension), dtype=float)
 
         texts = [self._extractor.extract(element) for element in elements]
-        text_features = self._text_pipeline.transform(texts)
-        if hasattr(text_features, "toarray"):
-            text_features = text_features.toarray()
-
+        text_features = self._text_encoder.transform(texts)
         structural = np.asarray(
             [self._structural_vector(element) for element in elements],
             dtype=float,

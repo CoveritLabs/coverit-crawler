@@ -3,26 +3,37 @@ from __future__ import annotations
 import csv
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
-from sklearn.decomposition import TruncatedSVD
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import classification_report, f1_score
-from sklearn.pipeline import FeatureUnion, Pipeline
 
 from src.crawler.semantic_engine.artifacts import (
     ModelArtifactLoader,
     save_model_bundle,
 )
+from src.crawler.semantic_engine.classifiers import (
+    ManualBinaryClassifier,
+    ManualSoftmaxClassifier,
+    ManualTopicModel,
+)
 from src.crawler.semantic_engine.extractor import DOMFeatureExtractor
-from src.crawler.semantic_engine.features import SklearnElementFeatureEncoder
+from src.crawler.semantic_engine.features import ManualElementFeatureEncoder
+from src.crawler.semantic_engine.metrics import (
+    binary_f1_score,
+    classification_report_dict,
+    macro_f1_score,
+)
 from src.crawler.semantic_engine.state import (
     PAIR_FEATURE_NAMES,
     StateProfiler,
     pair_features,
 )
-from src.crawler.semantic_engine.topic import SklearnTopicClassifier
+from src.crawler.semantic_engine.text_vectorizer import (
+    ManualHashingTfidfEncoder,
+    ManualTextFeatureCombiner,
+    ManualTfidfEncoder,
+)
+from src.crawler.semantic_engine.topic import ManualTopicClassifier
 from src.scripts.semantic_pipeline.datasets import (
     dataset_hash,
     read_state_snapshots,
@@ -36,65 +47,64 @@ def train_topic_model(
     output_path: Path,
     *,
     default_threshold: float,
-) -> dict:
+) -> dict[str, Any]:
     train_texts, train_labels = _read_topic_rows(train_path)
     validation_texts, validation_labels = _read_topic_rows(validation_path)
     test_texts, test_labels = _read_topic_rows(test_path)
-    pipeline = Pipeline(
+    if not train_texts:
+        raise ValueError("Cannot train topic model without labeled training rows")
+
+    vectorizer = ManualTextFeatureCombiner(
         [
             (
-                "features",
-                FeatureUnion(
-                    [
-                        (
-                            "word",
-                            TfidfVectorizer(
-                                ngram_range=(1, 2),
-                                min_df=2,
-                                max_features=20_000,
-                                sublinear_tf=True,
-                            ),
-                        ),
-                        (
-                            "character",
-                            TfidfVectorizer(
-                                analyzer="char_wb",
-                                ngram_range=(3, 5),
-                                min_df=2,
-                                max_features=30_000,
-                                sublinear_tf=True,
-                            ),
-                        ),
-                    ]
+                "word",
+                ManualTfidfEncoder(
+                    ngram_range=(1, 2),
+                    min_df=2,
+                    max_features=20_000,
+                    sublinear_tf=True,
                 ),
             ),
             (
-                "classifier",
-                LogisticRegression(
-                    class_weight="balanced",
-                    max_iter=2000,
-                    random_state=42,
+                "character",
+                ManualTfidfEncoder(
+                    analyzer="char_wb",
+                    ngram_range=(3, 5),
+                    min_df=2,
+                    max_features=30_000,
+                    sublinear_tf=True,
                 ),
             ),
         ]
+    ).fit(train_texts)
+    classifier = ManualSoftmaxClassifier(
+        epochs=35,
+        learning_rate=0.18,
+        l2=1e-4,
+        random_state=42,
+    ).fit(
+        vectorizer.transform_sparse(train_texts),
+        train_labels,
+        dimension=vectorizer.dimension,
     )
-    pipeline.fit(train_texts, train_labels)
+    model = ManualTopicModel(vectorizer, classifier)
     thresholds = _topic_thresholds(
-        pipeline,
+        model,
         validation_texts,
         validation_labels,
         default_threshold,
     )
-    predictions = pipeline.predict(test_texts)
+    predictions = model.predict(test_texts) if test_texts else []
     metrics = {
-        "macro_f1": float(
-            f1_score(test_labels, predictions, average="macro")
-        ),
-        "classification_report": classification_report(
+        "macro_f1": macro_f1_score(
             test_labels,
             predictions,
-            output_dict=True,
-            zero_division=0,
+            labels=model.classes_,
+        ),
+        "classification_report": classification_report_dict(
+            test_labels,
+            predictions,
+            labels=model.classes_,
         ),
     }
     save_model_bundle(
@@ -105,7 +115,7 @@ def train_topic_model(
             [train_path, validation_path, test_path]
         ),
         payload={
-            "pipeline": pipeline,
+            "model": model,
             "thresholds": thresholds,
             "default_threshold": default_threshold,
         },
@@ -121,8 +131,11 @@ def train_state_model(
     output_path: Path,
     *,
     components: int,
-) -> dict:
+) -> dict[str, Any]:
     pairs = _read_state_pairs(pairs_path)
+    if not pairs:
+        raise ValueError("Cannot train state model without labeled state pairs")
+
     needed_state_ids = {
         state_id
         for left_id, right_id, _, _ in pairs
@@ -137,8 +150,8 @@ def train_state_model(
         topic_artifact.name,
         "topic_classifier",
     )
-    topic_classifier = SklearnTopicClassifier(
-        topic_bundle.payload["pipeline"],
+    topic_classifier = ManualTopicClassifier(
+        topic_bundle.payload["model"],
         thresholds=topic_bundle.payload.get("thresholds"),
         default_threshold=float(
             topic_bundle.payload.get("default_threshold", 0.55)
@@ -152,29 +165,15 @@ def train_state_model(
     ]
     corpus = [text for text in corpus if text]
     dimension = min(components, max(2, len(corpus) - 1))
-    text_pipeline = Pipeline(
-        [
-            (
-                "tfidf",
-                TfidfVectorizer(
-                    ngram_range=(1, 2),
-                    min_df=1,
-                    sublinear_tf=True,
-                ),
-            ),
-            (
-                "svd",
-                TruncatedSVD(
-                    n_components=dimension,
-                    random_state=42,
-                ),
-            ),
-        ]
-    )
-    text_pipeline.fit(corpus)
+    text_encoder = ManualHashingTfidfEncoder(
+        n_features=dimension,
+        ngram_range=(1, 2),
+        min_df=1,
+        sublinear_tf=True,
+    ).fit(corpus)
     profiler = StateProfiler(
-        SklearnElementFeatureEncoder(
-            text_pipeline,
+        ManualElementFeatureEncoder(
+            text_encoder,
             topic_classifier=topic_classifier,
         ),
         topic_classifier,
@@ -191,6 +190,7 @@ def train_state_model(
         features.append([scores[name] for name in PAIR_FEATURE_NAMES])
         labels.append(label)
         splits.append(split)
+
     train_indices = [
         index for index, split in enumerate(splits) if split != "test"
     ]
@@ -199,24 +199,28 @@ def train_state_model(
     ]
     if not test_indices:
         test_indices = train_indices
-    classifier = LogisticRegression(
-        class_weight="balanced",
-        max_iter=1000,
+    if not train_indices:
+        train_indices = test_indices
+
+    feature_matrix = np.asarray(features, dtype=float)
+    label_vector = np.asarray(labels, dtype=int)
+    classifier = ManualBinaryClassifier(
+        epochs=700,
+        learning_rate=0.08,
+        l2=1e-4,
         random_state=42,
+    ).fit(
+        feature_matrix[train_indices],
+        label_vector[train_indices],
     )
-    classifier.fit(
-        np.asarray(features)[train_indices],
-        np.asarray(labels)[train_indices],
-    )
-    predictions = classifier.predict(np.asarray(features)[test_indices])
-    actual = np.asarray(labels)[test_indices]
+    predictions = classifier.predict(feature_matrix[test_indices])
+    actual = label_vector[test_indices]
     metrics = {
-        "macro_f1": float(f1_score(actual, predictions, average="macro")),
-        "classification_report": classification_report(
-            actual,
-            predictions,
-            output_dict=True,
-            zero_division=0,
+        "macro_f1": macro_f1_score(actual.tolist(), predictions.tolist(), labels=[0, 1]),
+        "classification_report": classification_report_dict(
+            actual.tolist(),
+            predictions.tolist(),
+            labels=[0, 1],
         ),
     }
     save_model_bundle(
@@ -225,7 +229,7 @@ def train_state_model(
         model_version=datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"),
         dataset_hash=dataset_hash([snapshots_path, pairs_path]),
         payload={
-            "text_pipeline": text_pipeline,
+            "text_encoder": text_encoder,
             "pair_classifier": classifier,
             "pair_feature_names": PAIR_FEATURE_NAMES,
         },
@@ -248,25 +252,25 @@ def _read_topic_rows(path: Path) -> tuple[list[str], list[str]]:
 
 
 def _topic_thresholds(
-    pipeline: Pipeline,
+    model: ManualTopicModel,
     texts: list[str],
     labels: list[str],
     default_threshold: float,
 ) -> dict[str, float]:
     if not texts:
-        return {str(label): default_threshold for label in pipeline.classes_}
-    probabilities = pipeline.predict_proba(texts)
+        return {str(label): default_threshold for label in model.classes_}
+    probabilities = model.predict_proba(texts)
     thresholds = {}
-    for index, label in enumerate(pipeline.classes_):
-        actual = np.asarray([item == label for item in labels], dtype=int)
+    for index, label in enumerate(model.classes_):
+        actual = [int(item == label) for item in labels]
         best_threshold = default_threshold
         best_score = -1.0
         for threshold in np.linspace(0.35, 0.9, 23):
-            score = f1_score(
-                actual,
-                (probabilities[:, index] >= threshold).astype(int),
-                zero_division=0,
-            )
+            predicted = [
+                int(probability >= threshold)
+                for probability in probabilities[:, index]
+            ]
+            score = binary_f1_score(actual, predicted)
             if score > best_score:
                 best_score = float(score)
                 best_threshold = float(threshold)

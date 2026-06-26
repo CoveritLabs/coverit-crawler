@@ -6,7 +6,7 @@ from typing import Any
 
 from src.crawler.semantic_engine.artifacts import ArtifactError, load_cached_model_bundle
 from src.crawler.semantic_engine.extractor import DOMFeatureExtractor
-from src.crawler.semantic_engine.features import SklearnElementFeatureEncoder
+from src.crawler.semantic_engine.features import ManualElementFeatureEncoder
 from src.crawler.semantic_engine.resolver import InputResolver, ResolvedInput
 from src.crawler.semantic_engine.state import (
     PairFeatureEquivalenceClassifier,
@@ -15,7 +15,7 @@ from src.crawler.semantic_engine.state import (
     StateProfiler,
     StateSemanticProfile,
 )
-from src.crawler.semantic_engine.topic import SklearnTopicClassifier, TopicClassifier
+from src.crawler.semantic_engine.topic import ManualTopicClassifier, TopicClassifier
 
 logger = logging.getLogger(__name__)
 
@@ -162,8 +162,8 @@ class SemanticEngine:
                 "topic_model.joblib",
                 "topic_classifier",
             )
-            topic_classifier = SklearnTopicClassifier(
-                topic_bundle.payload["pipeline"],
+            topic_classifier = ManualTopicClassifier(
+                topic_bundle.payload["model"],
                 thresholds=topic_bundle.payload.get("thresholds"),
                 default_threshold=float(
                     topic_bundle.payload.get("default_threshold", 0.55)
@@ -186,8 +186,8 @@ class SemanticEngine:
                 "state_equivalence.joblib",
                 "state_equivalence",
             )
-            encoder = SklearnElementFeatureEncoder(
-                state_bundle.payload["text_pipeline"],
+            encoder = ManualElementFeatureEncoder(
+                state_bundle.payload["text_encoder"],
                 topic_classifier=topic_classifier,
                 extractor=self.extractor,
             )

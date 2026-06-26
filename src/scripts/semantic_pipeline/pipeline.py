@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import argparse
+import asyncio
 import logging
 import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+if __package__ in {None, ""}:
+    root = Path(__file__).resolve().parents[3]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
 
 from src.scripts.semantic_pipeline.collectors import SemanticDataCollector
 from src.scripts.semantic_pipeline.datasets import (
@@ -59,6 +67,7 @@ async def run_pipeline(settings: PipelineSettings) -> None:
 
     if settings.reuse_collected:
         _require_existing(raw, snapshots)
+        _reset_generated_outputs(topic_data, staged_artifacts)
     else:
         await SemanticDataCollector(
             raw,
@@ -69,9 +78,7 @@ async def run_pipeline(settings: PipelineSettings) -> None:
             headless=settings.headless,
         ).collect(urls)
 
-    if settings.reuse_collected and labeled.exists() and topic_artifact.exists():
-        topic_metrics = {"macro_f1": 0.0}
-    else:
+    if not (settings.reuse_collected and labeled.exists()):
         label_topics(
             raw,
             labeled,
@@ -79,15 +86,15 @@ async def run_pipeline(settings: PipelineSettings) -> None:
             model_name=settings.labeling_model,
             threshold=0.45,
         )
-        prepared = prepare_topic_dataset(raw, labeled)
-        write_prepared_datasets(prepared, topic_data)
-        topic_metrics = train_topic_model(
-            topic_data / "topic_train.csv",
-            topic_data / "topic_validation.csv",
-            topic_data / "topic_test.csv",
-            topic_artifact,
-            default_threshold=0.55,
-        )
+    prepared = prepare_topic_dataset(raw, labeled)
+    write_prepared_datasets(prepared, topic_data)
+    topic_metrics = train_topic_model(
+        topic_data / "topic_train.csv",
+        topic_data / "topic_validation.csv",
+        topic_data / "topic_test.csv",
+        topic_artifact,
+        default_threshold=0.55,
+    )
 
     prepare_state_pairs(
         snapshots,
@@ -135,8 +142,55 @@ def _require_existing(*paths: Path) -> None:
         )
 
 
+def _reset_generated_outputs(*paths: Path) -> None:
+    for path in paths:
+        resolved = path.resolve()
+        if resolved.exists():
+            shutil.rmtree(resolved)
+        resolved.mkdir(parents=True, exist_ok=True)
+
+
 def _publish(staged: Path, destination: Path) -> None:
     resolved = destination.resolve()
     if resolved.exists():
         shutil.rmtree(resolved)
     shutil.copytree(staged, resolved)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--max-websites", type=int, default=0)
+    parser.add_argument("--max-pages-per-domain", type=int, default=3)
+    parser.add_argument("--max-actions-per-page", type=int, default=5)
+    parser.add_argument("--max-pairs", type=int, default=1000)
+    parser.add_argument("--timeout-ms", type=int, default=15000)
+    parser.add_argument("--visible", action="store_true")
+    parser.add_argument("--model", default="all-mpnet-base-v2")
+    parser.add_argument("--reuse-collected", action="store_true")
+    return parser
+
+
+def settings_from_args(args: argparse.Namespace) -> PipelineSettings:
+    root = Path(__file__).resolve().parents[3]
+    return PipelineSettings(
+        workspace=root / "data" / "semantic_pipeline",
+        artifacts=root / "src" / "models" / "semantic",
+        input_config=root / "src" / "configs" / "input_defaults.json",
+        max_websites=args.max_websites,
+        max_pages_per_domain=args.max_pages_per_domain,
+        max_actions_per_page=args.max_actions_per_page,
+        max_pairs=args.max_pairs,
+        timeout_ms=args.timeout_ms,
+        headless=not args.visible,
+        labeling_model=args.model,
+        reuse_collected=args.reuse_collected,
+    )
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO)
+    asyncio.run(run_pipeline(settings_from_args(build_parser().parse_args())))
+
+
+if __name__ == "__main__":
+    main()
