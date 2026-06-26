@@ -1,6 +1,38 @@
+import re
 from typing import Any
 
 from src.models import CrawlAction
+
+
+_SELECTOR_KEYS = (
+    "interactiveSelector",
+    "interactive_selector",
+    "element",
+    "selector",
+    "targetSelector",
+    "target_selector",
+)
+_DYNAMIC_ID_PATTERNS = (
+    re.compile(r"^_r_[a-z0-9_]+(?:--[a-z0-9_-]+)?$", re.IGNORECASE),
+    re.compile(r"^[0-9]+$"),
+    re.compile(r"^[a-f0-9]{8,}(?:-[a-f0-9]{4,})*$", re.IGNORECASE),
+)
+_CSS_ID_RE = re.compile(r"#([^\s\.#:\[>]+)")
+_CSS_CLASS_RE = re.compile(r"\.([^\s\.#:\[>]+)")
+_DYNAMIC_CLASS_PREFIXES = ("css-", "sc-", "prc-")
+_GENERATED_CLASS_SUFFIX_RE = re.compile(
+    r"(?:^|[-_])([A-Z]*[a-z]+[A-Z]+[A-Za-z0-9]*\d*|\w*\d+\w*)-?$"
+)
+_STABLE_SELECTOR_ATTRS = (
+    "data-testid",
+    "data-test",
+    "data-cy",
+    "data-qa",
+    "name",
+    "aria-label",
+    "placeholder",
+    "href",
+)
 
 
 def map_steps_to_actions(
@@ -73,6 +105,10 @@ def _selector(step: dict[str, Any]) -> str:
     return candidates[0] if candidates else ""
 
 
+def selector_candidates_for_step(step: dict[str, Any]) -> list[str]:
+    return _selector_candidates(step)
+
+
 def _selector_candidates(step: dict[str, Any]) -> list[str]:
     candidates: list[str] = []
 
@@ -81,25 +117,116 @@ def _selector_candidates(step: dict[str, Any]) -> list[str]:
         raw_candidates = [raw_candidates]
     if isinstance(raw_candidates, list):
         for candidate in raw_candidates:
-            _append_candidate(candidates, candidate)
+            _append_selector_candidate(candidates, candidate)
 
-    for key in (
-        "interactiveSelector",
-        "interactive_selector",
-        "element",
-        "selector",
-        "targetSelector",
-        "target_selector",
-    ):
-        _append_candidate(candidates, step.get(key))
+    for key in _SELECTOR_KEYS:
+        _append_selector_candidate(candidates, step.get(key))
 
     return candidates
 
 
-def _append_candidate(candidates: list[str], value: Any) -> None:
+def _append_selector_candidate(candidates: list[str], value: Any) -> None:
     selector = str(value or "").strip()
+    if not selector:
+        return
+
+    for candidate in _selector_expansions(selector):
+        _append_candidate(candidates, candidate)
+
+
+def _append_candidate(candidates: list[str], selector: str) -> None:
     if selector and selector not in candidates:
         candidates.append(selector)
+
+
+def _selector_expansions(selector: str) -> list[str]:
+    if not selector:
+        return []
+
+    expansions: list[str] = []
+    if _selector_is_stable(selector):
+        _append_candidate(expansions, selector)
+
+    parts = [part.strip() for part in selector.split(">") if part.strip()]
+    if len(parts) > 1:
+        for tail_len in range(1, min(3, len(parts)) + 1):
+            tail = " > ".join(parts[-tail_len:])
+            if _selector_is_stable(tail):
+                _append_candidate(expansions, tail)
+
+    if not expansions and not _selector_has_unstable_tokens(selector):
+        _append_candidate(expansions, selector)
+
+    return expansions
+
+
+def _selector_is_stable(selector: str) -> bool:
+    selector = selector.strip()
+    if not selector:
+        return False
+    if _selector_has_unstable_tokens(selector):
+        return False
+    if ">" in selector and selector.count(">") > 2:
+        return False
+    if ":nth-of-type" in selector and not _selector_has_stable_attr(selector):
+        return False
+    return True
+
+
+def _selector_has_stable_attr(selector: str) -> bool:
+    return any(f"[{attribute}" in selector for attribute in _STABLE_SELECTOR_ATTRS)
+
+
+def _selector_has_unstable_tokens(selector: str) -> bool:
+    for raw_id in _CSS_ID_RE.findall(selector):
+        if _is_dynamic_id(raw_id):
+            return True
+
+    for class_name in _CSS_CLASS_RE.findall(selector):
+        if _is_dynamic_class(class_name):
+            return True
+
+    return False
+
+
+def _normalize_css_token(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]", "", value.replace("\\", ""))
+
+
+def _is_dynamic_id(raw_id: str) -> bool:
+    token = _normalize_css_token(raw_id)
+    if not token:
+        return True
+    if any(pattern.fullmatch(token) for pattern in _DYNAMIC_ID_PATTERNS):
+        return True
+    if len(token) >= 6 and "-" not in token and "_" not in token:
+        has_upper = any(char.isupper() for char in token)
+        has_lower = any(char.islower() for char in token)
+        has_digit = any(char.isdigit() for char in token)
+        if has_digit and (has_upper or has_lower):
+            return True
+    return False
+
+
+def _is_dynamic_class(raw_class: str) -> bool:
+    class_name = _normalize_css_token(raw_class)
+    if not class_name:
+        return True
+    if class_name.startswith(_DYNAMIC_CLASS_PREFIXES):
+        return True
+
+    tail = class_name.rsplit("__", 1)[-1].rsplit("-", 1)[-1]
+    if len(tail) >= 5:
+        has_upper = any(char.isupper() for char in tail)
+        has_lower = any(char.islower() for char in tail)
+        has_digit = any(char.isdigit() for char in tail)
+        if has_upper and (has_lower or has_digit):
+            return True
+
+    return bool(
+        _GENERATED_CLASS_SUFFIX_RE.search(class_name)
+        and any(char.isupper() for char in class_name)
+    )
 
 
 def _is_labelable(action: CrawlAction) -> bool:

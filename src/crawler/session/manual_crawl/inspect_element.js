@@ -1,9 +1,41 @@
 ({ x, y, stateHash }) => {
+  const TEST_ID_ATTRIBUTES = ["data-testid", "data-test", "data-cy", "data-qa"];
+  const GENERATED_ID_RE = /^_r_[a-z0-9_]+(?:--[a-z0-9_-]+)?$/i;
+  const HASH_ID_RE = /^[a-f0-9]{8,}(?:-[a-f0-9]{4,})*$/i;
+  const DYNAMIC_CLASS_PREFIXES = ["css-", "sc-", "prc-"];
+
   function escapeCss(value) {
     if (globalThis.CSS && typeof globalThis.CSS.escape === "function") {
       return globalThis.CSS.escape(value);
     }
     return String(value).replace(/["\\\\]/g, "\\\\$&");
+  }
+
+  function escapeAttr(value) {
+    return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  }
+
+  function normalizedToken(value) {
+    return String(value || "").replace(/\\/g, "").replace(/[^A-Za-z0-9_-]/g, "");
+  }
+
+  function isGeneratedId(value) {
+    const token = normalizedToken(value);
+    if (!token) return true;
+    if (GENERATED_ID_RE.test(token) || HASH_ID_RE.test(token) || /^[0-9]+$/.test(token)) return true;
+    if (token.length >= 6 && !token.includes("-") && !token.includes("_")) {
+      return /\d/.test(token) && (/[a-z]/.test(token) || /[A-Z]/.test(token));
+    }
+    return false;
+  }
+
+  function isGeneratedClass(value) {
+    const className = normalizedToken(value);
+    if (!className) return true;
+    if (DYNAMIC_CLASS_PREFIXES.some((prefix) => className.startsWith(prefix))) return true;
+
+    const tail = className.split("__").pop().split("-").pop();
+    return tail.length >= 5 && /[A-Z]/.test(tail) && (/[a-z]/.test(tail) || /\d/.test(tail));
   }
 
   function addCandidate(candidates, value) {
@@ -13,68 +45,74 @@
   }
 
   function testIdSelectorFor(element) {
-    for (const attribute of ["data-testid", "data-test", "data-cy"]) {
+    for (const attribute of TEST_ID_ATTRIBUTES) {
       const value = element.getAttribute(attribute);
-      if (value) return `[${attribute}="${escapeCss(value)}"]`;
+      if (value) return `[${attribute}="${escapeAttr(value)}"]`;
     }
     return "";
   }
 
-  function selectorFor(element) {
-    if (!(element instanceof Element)) return "body";
-    const testId = testIdSelectorFor(element);
-    if (testId) return testId;
-    if (element.id) return `#${escapeCss(element.id)}`;
+  function attrSelectorFor(element, attribute) {
+    const value = element.getAttribute(attribute);
+    if (!value) return "";
+    return `${element.tagName.toLowerCase()}[${attribute}="${escapeAttr(value)}"]`;
+  }
 
-    const ariaLabel = element.getAttribute("aria-label");
-    if (ariaLabel) return `${element.tagName.toLowerCase()}[aria-label="${escapeCss(ariaLabel)}"]`;
+  function stableIdSelectorFor(element) {
+    return element.id && !isGeneratedId(element.id) ? `#${escapeCss(element.id)}` : "";
+  }
+
+  function stableClassNames(element) {
+    return [...element.classList]
+      .filter((className) => className && !/^\\d/.test(className) && !isGeneratedClass(className))
+      .slice(0, 2);
+  }
+
+  function selectorPartFor(element) {
+    const tag = element.tagName.toLowerCase();
+    const stableId = stableIdSelectorFor(element);
+    if (stableId) return `${tag}${stableId}`;
+
+    const classes = stableClassNames(element);
+    let part = tag;
+    for (const className of classes) part += `.${escapeCss(className)}`;
+    return part;
+  }
+
+  function pathSelectorFor(element) {
+    if (!(element instanceof Element)) return "body";
 
     const parts = [];
     let current = element;
-    while (current && current.nodeType === Node.ELEMENT_NODE && current !== document.body && parts.length < 6) {
-      let part = current.tagName.toLowerCase();
-      if (current.id) {
-        part += `#${escapeCss(current.id)}`;
-        parts.unshift(part);
-        break;
-      }
-
-      const classes = [...current.classList].filter((className) => className && !/^\\d/.test(className)).slice(0, 2);
-      for (const className of classes) part += `.${escapeCss(className)}`;
-
-      const parent = current.parentElement;
-      if (parent) {
-        const siblings = [...parent.children].filter((child) => child.tagName === current.tagName);
-        if (siblings.length > 1) part += `:nth-of-type(${siblings.indexOf(current) + 1})`;
-      }
-
+    while (current && current.nodeType === Node.ELEMENT_NODE && current !== document.body && parts.length < 4) {
+      const part = selectorPartFor(current);
+      const hasStableToken = part.includes("#") || part.includes(".");
       parts.unshift(part);
+      if (part.includes("#")) break;
+
       current = current.parentElement;
+      if (!hasStableToken && parts.length >= 2) break;
     }
 
     return parts.length ? parts.join(" > ") : "body";
   }
 
-  function selectorCandidatesFor(element) {
+  function selectorIsStable(selector) {
+    if (!selector) return false;
+    if (selector.includes(":nth-of-type")) return false;
+    if ((selector.match(/>/g) || []).length > 2) return false;
+    return true;
+  }
+
+  function stableTailSelectors(selector) {
+    const parts = String(selector || "").split(">").map((part) => part.trim()).filter(Boolean);
+    if (parts.length <= 1) return [];
+
     const candidates = [];
-    if (!(element instanceof Element)) return candidates;
-
-    addCandidate(candidates, testIdSelectorFor(element));
-    if (element.id) addCandidate(candidates, `#${escapeCss(element.id)}`);
-
-    const ariaLabel = element.getAttribute("aria-label");
-    if (ariaLabel) addCandidate(candidates, `${element.tagName.toLowerCase()}[aria-label="${escapeCss(ariaLabel)}"]`);
-
-    const name = element.getAttribute("name");
-    if (name) addCandidate(candidates, `${element.tagName.toLowerCase()}[name="${escapeCss(name)}"]`);
-
-    const href = element.tagName.toLowerCase() === "a" ? element.getAttribute("href") : "";
-    if (href) addCandidate(candidates, `a[href="${escapeCss(href)}"]`);
-
-    const role = element.getAttribute("role");
-    if (role) addCandidate(candidates, `${element.tagName.toLowerCase()}[role="${escapeCss(role)}"]`);
-
-    addCandidate(candidates, selectorFor(element));
+    for (let tailLength = 1; tailLength <= Math.min(3, parts.length); tailLength += 1) {
+      const tail = parts.slice(-tailLength).join(" > ");
+      if (selectorIsStable(tail)) addCandidate(candidates, tail);
+    }
     return candidates;
   }
 
@@ -96,6 +134,41 @@
       element.getAttribute("name") ||
       ""
     ).slice(0, 500);
+  }
+
+  function selectorCandidatesFor(element) {
+    const candidates = [];
+    if (!(element instanceof Element)) return candidates;
+
+    const tag = element.tagName.toLowerCase();
+    addCandidate(candidates, testIdSelectorFor(element));
+    addCandidate(candidates, attrSelectorFor(element, "name"));
+    addCandidate(candidates, attrSelectorFor(element, "aria-label"));
+    addCandidate(candidates, attrSelectorFor(element, "placeholder"));
+    addCandidate(candidates, stableIdSelectorFor(element));
+
+    const href = tag === "a" ? element.getAttribute("href") : "";
+    if (href && !href.startsWith("javascript:")) addCandidate(candidates, `a[href="${escapeAttr(href)}"]`);
+
+    const role = element.getAttribute("role");
+    const label = accessibleName(element) || safeText(element);
+    if (role && label && ["button", "link", "menuitem", "option", "tab"].includes(role)) {
+      addCandidate(candidates, `${tag}[role="${escapeAttr(role)}"]:has-text("${escapeAttr(label)}")`);
+    }
+    if ((tag === "button" || tag === "a") && label) {
+      addCandidate(candidates, `${tag}:has-text("${escapeAttr(label)}")`);
+    }
+
+    const path = pathSelectorFor(element);
+    for (const tail of stableTailSelectors(path)) addCandidate(candidates, tail);
+    if (selectorIsStable(path)) addCandidate(candidates, path);
+    return candidates;
+  }
+
+  function selectorFor(element) {
+    if (!(element instanceof Element)) return "body";
+    const candidates = selectorCandidatesFor(element);
+    return candidates[0] || pathSelectorFor(element) || "body";
   }
 
   function safeAttributes(element) {

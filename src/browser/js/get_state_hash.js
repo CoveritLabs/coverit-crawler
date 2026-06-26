@@ -46,6 +46,7 @@
     const allDocs = [document];
     for (const iframe of Array.from(document.querySelectorAll("iframe"))) {
         try {
+            if (!isVisible(iframe)) continue;
             const doc = iframe.contentDocument;
             if (doc) allDocs.push(doc);
         } catch {
