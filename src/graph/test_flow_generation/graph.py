@@ -1,0 +1,58 @@
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
+
+@dataclass(frozen=True, slots=True)
+class Edge:
+    source: str
+    target: str
+    transition_id: str
+
+@dataclass(slots=True)
+class FlowGraph:
+    adjacency: dict[str, list[Edge]] = field(default_factory=dict)
+    transition_count: int = 0
+    checkpoints: dict[str, str] = field(default_factory=dict)
+
+@dataclass(slots=True)
+class TestFlow:
+    transition_ids: list[str] = field(default_factory=list)
+    node_path: list[str] = field(default_factory=list)
+    visited_nodes: set[str] = field(default_factory=set)
+
+    def __post_init__(self):
+        self.visited_nodes.update(self.node_path)
+
+    def __len__(self) -> int:
+        return len(self.transition_ids)
+
+    @property
+    def state_count(self) -> int:
+        return len(self.node_path)
+
+    def add_step(self, transition_id: str, target_node: str) -> None:
+        self.transition_ids.append(transition_id)
+        self.node_path.append(target_node)
+        self.visited_nodes.add(target_node)
+
+def build_flow_graph(states: list, transitions: list) -> FlowGraph:
+    graph = FlowGraph()
+
+    for t in transitions:
+        src, tgt, tid = t.get("source_hash"), t.get("target_hash"), t.get("transition_id")
+        if not (src and tgt and tid):
+            continue
+        graph.adjacency.setdefault(src, []).append(Edge(source=src, target=tgt, transition_id=tid))
+        graph.transition_count += 1
+
+    graph.checkpoints = {
+        s["state_hash"]: s.get("checkpoint_url") 
+        for s in states 
+        if s.get("is_checkpoint") and s.get("state_hash")
+    }
+
+    logger.info("Built graph: %d real transitions", graph.transition_count)
+    return graph

@@ -1,0 +1,49 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Dependencies
+node_modules
+.venv/
+venv/
+.pnp
+.pnp.js
+
+# Build output
+dist
+*.egg-info
+
+# Test / coverage
+coverage
+.pytest_cache/
+.ruff_cache/
+.uv-cache/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+**/__pycache__/
+%SystemDrive%/
+/src/generated/prisma
+data/semantic_pipeline/
+data/semantic_source_archive/

@@ -1,0 +1,27 @@
+# Copyright (c) 2026 CoverIt Labs. All Rights Reserved.
+# Proprietary and confidential. Unauthorized use is strictly prohibited.
+# See LICENSE file in the project root for full license information.
+
+# Build override for testing the production crawler image locally.
+
+services:
+  crawler-worker:
+    image: coverit-crawler-test-local
+    build:
+      context: ${CRAWLER_DIR}
+      dockerfile: Dockerfile
+    pull_policy: build
+
+  flows-worker:
+    image: coverit-crawler-test-local
+    build:
+      context: ${CRAWLER_DIR}
+      dockerfile: Dockerfile
+    pull_policy: build
+
+  manual-worker:
+    image: coverit-crawler-test-local
+    build:
+      context: ${CRAWLER_DIR}
+      dockerfile: Dockerfile
+    pull_policy: build

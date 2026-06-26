@@ -1,0 +1,32 @@
+--index-url https://pypi.org/simple
+--extra-index-url https://coveritlabs.github.io/coverit-contracts/simple/
+
+aiohappyeyeballs==2.6.2
+aiohttp==3.14.1
+aiosignal==1.4.0
+arq==0.28.0
+asyncpg==0.31.0
+attrs==26.1.0
+click==8.4.1
+colorama==0.4.6 ; sys_platform == 'win32'
+coverit-contracts==1.18.0
+frozenlist==1.8.0
+greenlet==3.5.1
+hiredis==3.4.0
+idna==3.18
+joblib==1.5.3
+multidict==6.7.1
+narwhals==2.22.1
+neo4j==6.2.0
+numpy==2.4.6
+playwright==1.60.0
+propcache==0.5.2
+protobuf==7.35.1
+pyee==13.0.1
+pyjwt==2.13.0
+python-dotenv==1.2.2
+pytz==2026.2
+redis==5.3.1
+sqlalchemy==2.0.51
+typing-extensions==4.15.0
+yarl==1.24.2
