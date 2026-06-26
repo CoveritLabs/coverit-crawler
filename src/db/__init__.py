@@ -20,6 +20,7 @@ __all__ = [
     "mark_failed_if_running",
     "mark_finished_at_if_aborted",
     "mark_queued_running",
+    "update_counts_if_active",
     "TestFlow",
     "create_test_flow",
     "fetch_test_flow_details",
@@ -42,6 +43,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "mark_aborted_if_active": ("src.db.repositories.crawl_sessions", "mark_aborted_if_active"),
     "mark_finished_at_if_aborted": ("src.db.repositories.crawl_sessions", "mark_finished_at_if_aborted"),
     "mark_queued_running": ("src.db.repositories.crawl_sessions", "mark_queued_running"),
+    "update_counts_if_active": ("src.db.repositories.crawl_sessions", "update_counts_if_active"),
     "TestFlow": ("src.db.schemas.test_flow", "TestFlow"),
     "create_test_flow": ("src.db.repositories.test_flows", "create_test_flow"),
     "fetch_test_flow_details": ("src.db.repositories.test_flows", "fetch_test_flow_details"),
@@ -76,6 +78,7 @@ if TYPE_CHECKING:
         mark_aborted_if_active,
         mark_finished_at_if_aborted,
         mark_queued_running,
+        update_counts_if_active,
     )
     from src.db.schemas.crawl_sessions import CrawlSession
     from src.db.schemas.target_application import TargetApplication

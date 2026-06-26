@@ -11,3 +11,17 @@ services:
       context: ${CRAWLER_DIR}
       dockerfile: Dockerfile
     pull_policy: build
+
+  flows-worker:
+    image: coverit-crawler-test-local
+    build:
+      context: ${CRAWLER_DIR}
+      dockerfile: Dockerfile
+    pull_policy: build
+
+  manual-worker:
+    image: coverit-crawler-test-local
+    build:
+      context: ${CRAWLER_DIR}
+      dockerfile: Dockerfile
+    pull_policy: build

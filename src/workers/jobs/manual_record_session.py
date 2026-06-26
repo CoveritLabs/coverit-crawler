@@ -54,6 +54,9 @@ STATE_HASH_SCRIPT = (SRC_DIR / "browser" / "js" / "get_state_hash.js").read_text
 ANNOTATED_PAGE_CONTENT_SCRIPT = (
     SRC_DIR / "browser" / "js" / "get_annotated_page_content.js"
 ).read_text(encoding="utf-8")
+INSPECT_ELEMENT_SCRIPT = (
+    SRC_DIR / "crawler" / "session" / "manual_crawl" / "inspect_element.js"
+).read_text(encoding="utf-8")
 
 SelectorResolver = Callable[[str, str], Awaitable[bool]]
 
@@ -196,8 +199,6 @@ def _action_is_password(action: CrawlAction) -> bool:
 
 
 def _display_action_value(action: CrawlAction) -> str:
-    if _action_is_password(action):
-        return ""
     return str(action.value or "")
 
 
@@ -245,10 +246,6 @@ def _event_is_input_like(event: dict[str, Any]) -> bool:
     return _event_action(event) in {"input", "change"}
 
 
-def _event_is_password(event: dict[str, Any]) -> bool:
-    return str(event.get("inputType") or event.get("input_type") or "").lower() == "password"
-
-
 def _event_selector(event: dict[str, Any]) -> str:
     candidates: list[str] = []
     raw_candidates = event.get("selectorCandidates") or event.get("selector_candidates") or []
@@ -273,13 +270,6 @@ def _event_selector(event: dict[str, Any]) -> str:
             candidates.append(selector)
 
     return candidates[0] if candidates else ""
-
-
-def _display_event(event: dict[str, Any]) -> dict[str, Any]:
-    display = dict(event)
-    if _event_is_password(display):
-        display["value"] = ""
-    return display
 
 
 def _log_event_summary(event: dict[str, Any]) -> dict[str, Any]:
@@ -309,7 +299,7 @@ def _compact_manual_events(
 ) -> list[dict[str, Any]]:
     compacted: list[dict[str, Any]] = []
     for event in events:
-        next_event = _display_event(event) if display_safe else dict(event)
+        next_event = dict(event)
         action = _event_action(next_event)
         selector = _event_selector(next_event)
 
@@ -333,6 +323,17 @@ def _compact_manual_events(
             compacted.append(next_event)
 
     return compacted
+
+
+def _pending_input_group_selector(events: list[dict[str, Any]]) -> str:
+    compacted = _compact_manual_events(events, display_safe=False)
+    if len(compacted) != 1:
+        return ""
+
+    event = compacted[0]
+    if not _event_is_input_like(event):
+        return ""
+    return _event_selector(event)
 
 
 def _action_value_is_docgen_safe(value: Any) -> bool:
@@ -485,7 +486,7 @@ class ManualSegmentRecorder:
         if (time.monotonic() - self._pending_updated_at) < PENDING_EVENT_FLUSH_SECONDS:
             return False
 
-        flushable_actions = {"input", "change"}
+        flushable_actions = {"input", "change", "hover"}
         return all(
             str(event.get("action") or "") in flushable_actions
             for event in self._pending_events
@@ -543,6 +544,9 @@ class ManualSegmentRecorder:
             self._pending_updated_at = time.monotonic()
             return self._active
 
+    async def publish_pending_events(self) -> list[dict[str, Any]]:
+        return await self.flush_current_state(force_pending=True)
+
     async def flush_current_state(self, *, force_pending: bool = False) -> list[dict[str, Any]]:
         async with self._lock:
             if self._rewinding:
@@ -555,7 +559,16 @@ class ManualSegmentRecorder:
             source_index = self._current_state_idx
             source_snapshot = self._states[source_index]
             changed = next_hash != source_snapshot.state.state_hash
+            pending_age = time.monotonic() - self._pending_updated_at
             if changed and not self._pending_events and not force_pending and self._waiting_for_dom_event():
+                return []
+            if (
+                changed
+                and self._pending_events
+                and not force_pending
+                and pending_age < PENDING_EVENT_FLUSH_SECONDS
+                and _pending_input_group_selector(self._pending_events)
+            ):
                 return []
             if not changed and not (force_pending and self._pending_events):
                 return []
@@ -791,7 +804,7 @@ class ManualSegmentRecorder:
         source = self._states[source_index].state
         target = self._states[target_index].state
         action_events = _compact_manual_events(events, display_safe=False)
-        display_events = _compact_manual_events(events, display_safe=True)
+        display_events = _compact_manual_events(events, display_safe=False)
         actions = [
             action
             for action in map_steps_to_actions(action_events, fallback_url=target.url or source.url)
@@ -893,7 +906,7 @@ class ManualSegmentRecorder:
         snapshot.events = (
             display_events
             if replacing_focus_click
-            else _compact_manual_events([*snapshot.events, *display_events], display_safe=True)
+            else _compact_manual_events([*snapshot.events, *display_events], display_safe=False)
         )
         snapshot.transition = _build_manual_transition(
             graph_id=self._graph_id,
@@ -1231,6 +1244,7 @@ async def _event_sender(
     event_queue: asyncio.Queue[dict[str, Any]],
     recorder: ManualSegmentRecorder | None = None,
     activity_reset: Callable[[], Awaitable[None]] | None = None,
+    step_queue: asyncio.Queue[dict[str, Any]] | None = None,
 ) -> None:
     while True:
         event = await event_queue.get()
@@ -1362,14 +1376,104 @@ def _normalize_button(value: Any) -> str:
     return "left"
 
 
-async def _handle_mouse_input(page: Any, input_payload: dict[str, Any]) -> None:
+async def _inspect_element_at(page: Any, x: int, y: int) -> dict[str, Any] | None:
+    state_hash = ""
+    try:
+        semantic = await page.evaluate(STATE_HASH_SCRIPT)
+        state_hash = StateManager.hash_content(str(semantic))
+    except Exception:
+        state_hash = ""
+
+    try:
+        element = await page.evaluate(
+            INSPECT_ELEMENT_SCRIPT,
+            {"x": x, "y": y, "stateHash": state_hash},
+        )
+    except Exception:
+        logger.debug("Failed to inspect explicit hover target", exc_info=True)
+        return None
+
+    return element if isinstance(element, dict) else None
+
+
+def _synthetic_hover_event(
+    session_id: str,
+    element: dict[str, Any],
+    x: int,
+    y: int,
+) -> dict[str, Any]:
+    selector = str(element.get("selector") or "")
+    raw_candidates = element.get("selectorCandidates") or []
+    selector_candidates = raw_candidates if isinstance(raw_candidates, list) else []
+    tag = str(element.get("tag") or "")
+    text = str(element.get("text") or "")
+    accessible_name = str(element.get("accessibleName") or "")
+    label = accessible_name or text or selector or tag or "element"
+    box = element.get("box") if isinstance(element.get("box"), dict) else None
+    viewport = (
+        element.get("viewport")
+        if isinstance(element.get("viewport"), dict)
+        else {"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT}
+    )
+
+    return {
+        "id": str(uuid4()),
+        "sessionId": session_id,
+        "timestamp": _utc_now(),
+        "action": "hover",
+        "pageUrl": str(element.get("pageUrl") or ""),
+        "frameUrl": "",
+        "selector": selector,
+        "selectorCandidates": selector_candidates,
+        "interactiveSelector": selector,
+        "element": selector,
+        "targetSelector": selector,
+        "x": x,
+        "y": y,
+        "pageX": x,
+        "pageY": y,
+        "button": 2,
+        "tag": tag or None,
+        "targetTag": tag or None,
+        "label": label,
+        "text": text,
+        "accessibleName": accessible_name,
+        "targetText": text,
+        "targetAccessibleName": accessible_name,
+        "href": None,
+        "elementBox": box,
+        "targetElementBox": box,
+        "viewport": viewport,
+    }
+
+
+async def _handle_hover_input(
+    page: Any,
+    session_id: str,
+    x: int,
+    y: int,
+) -> dict[str, Any] | None:
+    element = await _inspect_element_at(page, x, y)
+    await page.mouse.move(x, y)
+    if element is None:
+        return None
+    return _synthetic_hover_event(session_id, element, x, y)
+
+
+async def _handle_mouse_input(
+    page: Any,
+    input_payload: dict[str, Any],
+    session_id: str,
+) -> dict[str, Any] | None:
     action = str(input_payload.get("action") or "")
     x = round(float(input_payload.get("x") or 0))
     y = round(float(input_payload.get("y") or 0))
     button = _normalize_button(input_payload.get("button"))
 
     if action == "move":
-        await page.mouse.move(x, y)
+        return None
+    if action == "hover":
+        return await _handle_hover_input(page, session_id, x, y)
     elif action == "down":
         await page.mouse.move(x, y)
         await page.mouse.down(button=button)
@@ -1381,6 +1485,7 @@ async def _handle_mouse_input(page: Any, input_payload: dict[str, Any]) -> None:
             float(input_payload.get("deltaX") or 0),
             float(input_payload.get("deltaY") or 0),
         )
+    return None
 
 
 async def _handle_keyboard_input(page: Any, input_payload: dict[str, Any]) -> None:
@@ -1440,7 +1545,7 @@ async def _handle_browser_input(page: Any, message: dict[str, Any], session_id: 
 
     kind = str(input_payload.get("kind") or input_payload.get("type") or "")
     if kind == "mouse":
-        await _handle_mouse_input(page, input_payload)
+        return await _handle_mouse_input(page, input_payload, session_id)
     elif kind == "keyboard":
         await _handle_keyboard_input(page, input_payload)
     elif kind == "navigation":
@@ -1471,6 +1576,10 @@ async def _execute_replay_action(page: Any, action: CrawlAction, job: CrawlJob) 
             await page.press(selector, value, timeout=job.timeout_ms)
         else:
             await page.keyboard.press(value)
+    elif action_type == "hover":
+        if not selector:
+            raise RuntimeError("Cannot replay hover without a selector")
+        await page.hover(selector, timeout=job.timeout_ms)
     elif action_type == "navigate":
         if value:
             await page.goto(value, wait_until="domcontentloaded", timeout=job.timeout_ms)
@@ -1580,8 +1689,15 @@ async def manual_record_session(ctx: dict, session_id: str) -> dict[str, Any]:
 
     try:
         async with db() as s:
-            config_json, base_url, graph_id = await fetch_job_inputs(s, session_id)
+            (
+                config_json,
+                base_url,
+                _app_version_graph_id,
+                _state_count,
+                _transition_count,
+            ) = await fetch_job_inputs(s, session_id)
 
+        graph_id = session_id
         payload = _build_payload_from_db(config_json, base_url, session_id, graph_id)
         job = CrawlJob.from_dict(payload, config)
         event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
@@ -1634,7 +1750,7 @@ async def manual_record_session(ctx: dict, session_id: str) -> dict[str, Any]:
             )
             ttl_monitor_task = asyncio.create_task(ttl.monitor())
             event_sender_task = asyncio.create_task(
-                _event_sender(ws, send_lock, event_queue, recorder, ttl.reset)
+                _event_sender(ws, send_lock, event_queue, recorder, ttl.reset, step_queue)
             )
             step_sender_task = asyncio.create_task(_step_sender(ws, send_lock, step_queue, ttl.reset))
             state_monitor_task = asyncio.create_task(_state_monitor(recorder, step_queue))
@@ -1714,6 +1830,7 @@ async def manual_record_session(ctx: dict, session_id: str) -> dict[str, Any]:
                     if message_type in {
                         "browser.input",
                         "flow.start",
+                        "flow.publish_pending",
                         "flow.finish",
                         "flow.rewind",
                         "bug.report",
@@ -1739,6 +1856,27 @@ async def manual_record_session(ctx: dict, session_id: str) -> dict[str, Any]:
                                 **started_payload,
                             },
                         )
+                    elif message_type == "flow.publish_pending":
+                        if not recorder.active:
+                            await _send_ws(ws, send_lock, {"type": "error", "message": "No manual flow is active"})
+                            continue
+                        try:
+                            published_steps = await recorder.publish_pending_events()
+                            for step in published_steps:
+                                await step_queue.put(step)
+                            await ttl.reset()
+                            await _send_ws(
+                                ws,
+                                send_lock,
+                                {
+                                    "type": "flow.pending_published",
+                                    "sessionId": session_id,
+                                    "stepCount": len(published_steps),
+                                    "timestamp": _utc_now(),
+                                },
+                            )
+                        except Exception as exc:
+                            await _send_ws(ws, send_lock, {"type": "error", "message": str(exc)})
                     elif message_type == "flow.finish":
                         try:
                             completed = await recorder.finish_manual_flow()

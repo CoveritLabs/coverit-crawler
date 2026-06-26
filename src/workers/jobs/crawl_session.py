@@ -14,6 +14,7 @@ from src.db.repositories.crawl_sessions import (
     mark_completed_if_running,
     mark_failed_if_running,
     mark_finished_at_if_aborted,
+    update_counts_if_active,
 )
 from src.db.services.crawl_sessions import ensure_started_or_skip_aborted
 from src.graph.test_flow_generation.stage2_selecting_best_tf import MAX_TF_TAKEN
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_TEST_FLOW_GENERATION_CONFIG = {
     "coverage_percentage": 100.0,
     "num_of_tf": 1,
+    "max_num_of_tf": MAX_TF_TAKEN,
     "num_of_states": 20,
     "min_num_of_states_per_tf": 3,
 }
@@ -137,6 +139,11 @@ def _should_generate_test_flows(config_json: dict[str, Any]) -> bool:
     return value is not False
 
 
+def _should_generate_test_code(config_json: dict[str, Any]) -> bool:
+    value = _pick(config_json, "generateTestCode", "generate_test_code")
+    return value is True
+
+
 def _test_flow_generation_config(config_json: dict[str, Any]) -> dict[str, Any]:
     value = _pick(config_json, "testFlowGeneration", "test_flow_generation")
     return value if isinstance(value, dict) else {}
@@ -157,6 +164,10 @@ def _flow_generation_kwargs(config_json: dict[str, Any]) -> dict[str, Any]:
         _pick(generation, "num_of_tf", "numOfTf"),
         DEFAULT_TEST_FLOW_GENERATION_CONFIG["num_of_tf"],
     )
+    max_flows = coerce_int(
+        _pick(generation, "max_num_of_tf", "maxNumOfTf"),
+        DEFAULT_TEST_FLOW_GENERATION_CONFIG["max_num_of_tf"],
+    )
     coverage_percentage = coerce_float(
         _pick(generation, "coverage_percentage", "coveragePercentage"),
         DEFAULT_TEST_FLOW_GENERATION_CONFIG["coverage_percentage"],
@@ -169,6 +180,7 @@ def _flow_generation_kwargs(config_json: dict[str, Any]) -> dict[str, Any]:
         "min_num_of_states_per_tf": min_states,
         "max_num_of_states_per_tf": max_states,
         "min_num_of_tf": min(MAX_TF_TAKEN, max(1, min_flows)),
+        "max_num_of_tf": min(MAX_TF_TAKEN, max(1, max_flows)),
         "convergence_threshold": min(100.0, max(0.0, coverage_percentage)) / 100,
     }
 
@@ -220,6 +232,61 @@ def _build_payload_from_db(config_json: dict[str, Any], base_url: str, session_i
     }
 
 
+async def _complete_crawl_session(
+    ctx: dict,
+    db: Any,
+    *,
+    session_id: str,
+    graph_id: str,
+    config_json: dict[str, Any],
+    state_count: int,
+    transition_count: int,
+    generate_test_flows: bool,
+    generate_test_code: bool,
+) -> dict[str, Any]:
+    async with db() as s:
+        status = await get_session_status(s, session_id)
+
+    if status == "PAUSED":
+        async with db() as s:
+            await update_counts_if_active(s, session_id, state_count, transition_count)
+        return {
+            "status": "paused",
+            "session_id": session_id,
+            "state_count": state_count,
+            "transition_count": transition_count,
+        }
+
+    if status == "ABORTED":
+        async with db() as s:
+            await mark_finished_at_if_aborted(s, session_id)
+        return {"status": "aborted", "session_id": session_id}
+
+    flow_generation_result: dict[str, Any] | None = None
+    if generate_test_flows and status == "RUNNING":
+        flow_generation_result = await run_find_all_flows(
+            ctx,
+            session_id,
+            graph_id,
+            enqueue_bdd=generate_test_code,
+            **_flow_generation_kwargs(config_json),
+        )
+
+    async with db() as s:
+        updated = await mark_completed_if_running(s, session_id, state_count, transition_count)
+        if not updated:
+            await mark_finished_at_if_aborted(s, session_id)
+            return {"status": "aborted", "session_id": session_id}
+
+    return {
+        "status": "completed",
+        "session_id": session_id,
+        "state_count": state_count,
+        "transition_count": transition_count,
+        "flows": flow_generation_result,
+    }
+
+
 async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
     db = ctx["db"]
     worker = ctx["crawler_worker"]
@@ -259,18 +326,39 @@ async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
 
     try:
         async with db() as s:
-            config_json, base_url, graph_id = await fetch_job_inputs(s, session_id)
+            (
+                config_json,
+                base_url,
+                graph_id,
+                discovered_state_count,
+                discovered_transition_count,
+            ) = await fetch_job_inputs(s, session_id)
             started_at = await fetch_started_at(s, session_id)
 
         payload = _build_payload_from_db(config_json, base_url, session_id, graph_id)
         generate_test_flows = _should_generate_test_flows(config_json)
+        generate_test_code = _should_generate_test_code(config_json)
         job = CrawlJob.from_dict(payload, worker._settings)
         initial_progress = await _crawl_progress(worker, graph_id, session_id)
         initial_state_count, initial_transition_count = _progress_counts(initial_progress)
 
         remaining_timeout = _remaining_timeout_seconds(config_json, started_at)
-        if remaining_timeout is not None and remaining_timeout <= TIMEOUT_SECONDS_BUFFER and _has_pending_work(initial_progress):
-            raise TimeoutError(f"Crawl timed out after {_timeout_seconds(config_json)} seconds")
+        if remaining_timeout is not None and remaining_timeout <= TIMEOUT_SECONDS_BUFFER:
+            logger.info(
+                "Crawl session %s reached timeout limit before another slice; completing with current graph",
+                session_id,
+            )
+            return await _complete_crawl_session(
+                ctx,
+                db,
+                session_id=session_id,
+                graph_id=graph_id,
+                config_json=config_json,
+                state_count=max(discovered_state_count, initial_state_count),
+                transition_count=max(discovered_transition_count, initial_transition_count),
+                generate_test_flows=generate_test_flows,
+                generate_test_code=generate_test_code,
+            )
 
         slice_duration = _slice_seconds(worker._settings, remaining_timeout)
         slice_deadline_monotonic = time.monotonic() + slice_duration
@@ -283,6 +371,8 @@ async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
                 slice_deadline_monotonic=slice_deadline_monotonic,
                 initial_state_count=initial_state_count,
                 initial_transition_count=initial_transition_count,
+                initial_discovered_state_count=discovered_state_count,
+                initial_discovered_transition_count=discovered_transition_count,
             )
         )
         poll_task = asyncio.create_task(abort_poller())
@@ -309,21 +399,20 @@ async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
                 await mark_finished_at_if_aborted(s, session_id)
             return {"status": "aborted", "session_id": session_id}
 
-        state_count, transition_count = await crawl_task
+        discovered_state_count, discovered_transition_count = await crawl_task
         progress = await _crawl_progress(worker, graph_id, session_id)
-        persisted_state_count, persisted_transition_count = _progress_counts(progress)
-        state_count = max(state_count, persisted_state_count)
-        transition_count = max(transition_count, persisted_transition_count)
 
         async with db() as s:
             status = await get_session_status(s, session_id)
 
         if pause_event.is_set() or status == "PAUSED":
+            async with db() as s:
+                await update_counts_if_active(s, session_id, discovered_state_count, discovered_transition_count)
             return {
                 "status": "paused",
                 "session_id": session_id,
-                "state_count": state_count,
-                "transition_count": transition_count,
+                "state_count": discovered_state_count,
+                "transition_count": discovered_transition_count,
             }
 
         if status == "ABORTED":
@@ -334,9 +423,25 @@ async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
         if _should_continue_crawl(progress, job):
             remaining_timeout = _remaining_timeout_seconds(config_json, started_at)
             if remaining_timeout is not None and remaining_timeout <= TIMEOUT_SECONDS_BUFFER:
-                raise TimeoutError(f"Crawl timed out after {_timeout_seconds(config_json)} seconds")
+                logger.info(
+                    "Crawl session %s reached timeout limit after slice; completing without continuation",
+                    session_id,
+                )
+                return await _complete_crawl_session(
+                    ctx,
+                    db,
+                    session_id=session_id,
+                    graph_id=graph_id,
+                    config_json=config_json,
+                    state_count=discovered_state_count,
+                    transition_count=discovered_transition_count,
+                    generate_test_flows=generate_test_flows,
+                    generate_test_code=generate_test_code,
+                )
 
             continuation_job_id = await _enqueue_continuation(ctx, worker, session_id)
+            async with db() as s:
+                await update_counts_if_active(s, session_id, discovered_state_count, discovered_transition_count)
             logger.info(
                 "Crawl session %s yielded with pending work; enqueued continuation %s",
                 session_id,
@@ -345,33 +450,22 @@ async def crawl_session(ctx: dict, session_id: str) -> dict[str, Any]:
             return {
                 "status": "continued",
                 "session_id": session_id,
-                "state_count": state_count,
-                "transition_count": transition_count,
+                "state_count": discovered_state_count,
+                "transition_count": discovered_transition_count,
                 "continuation_job_id": continuation_job_id,
             }
 
-        flow_generation_result: dict[str, Any] | None = None
-        if generate_test_flows and status == "RUNNING":
-            flow_generation_result = await run_find_all_flows(
-                ctx,
-                session_id,
-                graph_id,
-                **_flow_generation_kwargs(config_json),
-            )
-
-        async with db() as s:
-            updated = await mark_completed_if_running(s, session_id, state_count, transition_count)
-            if not updated:
-                await mark_finished_at_if_aborted(s, session_id)
-                return {"status": "aborted", "session_id": session_id}
-
-        return {
-            "status": "completed",
-            "session_id": session_id,
-            "state_count": state_count,
-            "transition_count": transition_count,
-            "flows": flow_generation_result,
-        }
+        return await _complete_crawl_session(
+            ctx,
+            db,
+            session_id=session_id,
+            graph_id=graph_id,
+            config_json=config_json,
+            state_count=discovered_state_count,
+            transition_count=discovered_transition_count,
+            generate_test_flows=generate_test_flows,
+            generate_test_code=generate_test_code,
+        )
 
     except asyncio.CancelledError:
         async with db() as s:

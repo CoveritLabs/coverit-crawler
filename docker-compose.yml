@@ -18,6 +18,7 @@ services:
       NEO4J_USER: ${NEO4J_USER:-neo4j}
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:-password}
       COVERIT_API_INTERNAL_URL: ${CRAWLER_API_INTERNAL_URL:-http://api:3000/api/v1}
+      CRAWLER_LOG_LEVEL: ${CRAWLER_LOG_LEVEL:-INFO}
     init: true
     shm_size: "1gb"
     restart: unless-stopped
@@ -51,6 +52,7 @@ services:
       NEO4J_USER: ${NEO4J_USER:-neo4j}
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:-password}
       COVERIT_API_INTERNAL_URL: ${CRAWLER_API_INTERNAL_URL:-http://api:3000/api/v1}
+      CRAWLER_LOG_LEVEL: ${CRAWLER_LOG_LEVEL:-INFO}
     init: true
     shm_size: "1gb"
     restart: unless-stopped
@@ -84,6 +86,7 @@ services:
       NEO4J_USER: ${NEO4J_USER:-neo4j}
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:-password}
       COVERIT_API_INTERNAL_URL: ${CRAWLER_API_INTERNAL_URL:-http://api:3000/api/v1}
+      CRAWLER_LOG_LEVEL: ${CRAWLER_LOG_LEVEL:-INFO}
     init: true
     shm_size: "1gb"
     restart: unless-stopped

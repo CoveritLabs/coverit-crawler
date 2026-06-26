@@ -3,7 +3,9 @@ from __future__ import annotations
 from arq.worker import run_worker
 
 from src import config
+from src.workers.jobs.flow_editor_session import flow_editor_session
 from src.workers.jobs.manual_record_session import manual_record_session
+from src.workers.logging_config import configure_worker_logging
 from src.workers.main import (
     _redis_settings_from_url,
     arq_job_deserializer,
@@ -12,11 +14,15 @@ from src.workers.main import (
     startup,
 )
 
+configure_worker_logging("manual-worker")
+
 
 class ManualWorkerSettings:
-    redis_settings = _redis_settings_from_url(config.REDIS_URL or "redis://localhost:6379/0")
+    redis_settings = _redis_settings_from_url(
+        config.REDIS_URL or "redis://localhost:6379/0"
+    )
     queue_name = config.MANUAL_ARQ_QUEUE_NAME
-    functions = [manual_record_session]
+    functions = [manual_record_session, flow_editor_session]
     on_startup = startup
     on_shutdown = shutdown
     cron_jobs = []

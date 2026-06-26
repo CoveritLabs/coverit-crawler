@@ -60,6 +60,28 @@ async def mark_completed_if_running(
     return (result.rowcount or 0) == 1
 
 
+async def update_counts_if_active(
+    session: AsyncSession,
+    session_id: str,
+    state_count: int,
+    transition_count: int,
+) -> bool:
+    stmt = (
+        update(CrawlSession)
+        .where(
+            CrawlSession.crawl_session_id == session_id,
+            CrawlSession.status.in_([CrawlStatus.RUNNING, CrawlStatus.PAUSED]),
+        )
+        .values(
+            state_count=state_count,
+            transition_count=transition_count,
+        )
+    )
+    result = await session.execute(stmt)
+    await session.commit()
+    return (result.rowcount or 0) == 1
+
+
 async def mark_failed_if_running(
     session: AsyncSession,
     session_id: str,
@@ -117,7 +139,7 @@ async def mark_finished_at_if_aborted(session: AsyncSession, session_id: str) ->
     await session.commit()
 
 
-async def fetch_job_inputs(session: AsyncSession, session_id: str) -> tuple[dict[str, Any], str, str]:
+async def fetch_job_inputs(session: AsyncSession, session_id: str) -> tuple[dict[str, Any], str, str, int, int]:
     stmt = (
         select(CrawlSession)
         .options(joinedload(CrawlSession.app_version).joinedload(TargetApplicationVersion.target_application))
@@ -153,7 +175,13 @@ async def fetch_job_inputs(session: AsyncSession, session_id: str) -> tuple[dict
     if not app_version_id:
         raise RuntimeError(f"app_version_id missing for session: {session_id}")
 
-    return config_json, base_url, app_version_id
+    return (
+        config_json,
+        base_url,
+        app_version_id,
+        int(crawl_session.state_count or 0),
+        int(crawl_session.transition_count or 0),
+    )
 
 
 async def fetch_graph_id(session: AsyncSession, session_id: str) -> str:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from typing import Any
 from urllib.parse import urlparse
 
@@ -12,22 +11,9 @@ from src import config
 from src.db import create_engine, create_sessionmaker
 from src.workers.crawler_worker import CrawlerWorker
 from src.workers.jobs.crawl_session import crawl_session
+from src.workers.logging_config import configure_worker_logging
 
-logging.getLogger("neo4j").setLevel(logging.WARNING)
-logging.getLogger("neo4j.notifications").setLevel(logging.WARNING)
-logging.getLogger("neo4j.notifications").disabled = True
-logging.getLogger("neo4j.notifications").propagate = False
-
-
-class _DropNeo4jNotificationFilter(logging.Filter):
-    def filter(self, record: logging.LogRecord) -> bool:
-        return not str(record.getMessage()).startswith("Received notification from DBMS server")
-
-
-_neo4j_notification_filter = _DropNeo4jNotificationFilter()
-logging.getLogger().addFilter(_neo4j_notification_filter)
-logging.getLogger("neo4j").addFilter(_neo4j_notification_filter)
-logging.getLogger("neo4j.notifications").addFilter(_neo4j_notification_filter)
+configure_worker_logging("crawler-worker")
 
 
 def arq_job_serializer(value: Any) -> bytes:
@@ -58,7 +44,10 @@ def _redis_settings_from_url(url: str) -> RedisSettings:
 
 
 def _crawler_job_timeout_seconds() -> int:
-    return max(config.CRAWLER_JOB_TIMEOUT_SECONDS, config.CRAWLER_JOB_SLICE_SECONDS + 120)
+    return max(
+        config.CRAWLER_JOB_TIMEOUT_SECONDS,
+        config.CRAWLER_JOB_SLICE_SECONDS + 120,
+    )
 
 
 async def startup(ctx: dict) -> None:
@@ -89,7 +78,9 @@ async def shutdown(ctx: dict) -> None:
 
 
 class WorkerSettings:
-    redis_settings = _redis_settings_from_url(config.REDIS_URL or "redis://localhost:6379/0")
+    redis_settings = _redis_settings_from_url(
+        config.REDIS_URL or "redis://localhost:6379/0"
+    )
     queue_name = config.ARQ_QUEUE_NAME
     functions = [crawl_session]
     on_startup = startup
