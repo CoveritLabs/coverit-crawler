@@ -199,8 +199,6 @@ def _action_is_password(action: CrawlAction) -> bool:
 
 
 def _display_action_value(action: CrawlAction) -> str:
-    if _action_is_password(action):
-        return ""
     return str(action.value or "")
 
 
@@ -248,10 +246,6 @@ def _event_is_input_like(event: dict[str, Any]) -> bool:
     return _event_action(event) in {"input", "change"}
 
 
-def _event_is_password(event: dict[str, Any]) -> bool:
-    return str(event.get("inputType") or event.get("input_type") or "").lower() == "password"
-
-
 def _event_selector(event: dict[str, Any]) -> str:
     candidates: list[str] = []
     raw_candidates = event.get("selectorCandidates") or event.get("selector_candidates") or []
@@ -276,13 +270,6 @@ def _event_selector(event: dict[str, Any]) -> str:
             candidates.append(selector)
 
     return candidates[0] if candidates else ""
-
-
-def _display_event(event: dict[str, Any]) -> dict[str, Any]:
-    display = dict(event)
-    if _event_is_password(display):
-        display["value"] = ""
-    return display
 
 
 def _log_event_summary(event: dict[str, Any]) -> dict[str, Any]:
@@ -312,7 +299,7 @@ def _compact_manual_events(
 ) -> list[dict[str, Any]]:
     compacted: list[dict[str, Any]] = []
     for event in events:
-        next_event = _display_event(event) if display_safe else dict(event)
+        next_event = dict(event)
         action = _event_action(next_event)
         selector = _event_selector(next_event)
 
@@ -336,6 +323,17 @@ def _compact_manual_events(
             compacted.append(next_event)
 
     return compacted
+
+
+def _pending_input_group_selector(events: list[dict[str, Any]]) -> str:
+    compacted = _compact_manual_events(events, display_safe=False)
+    if len(compacted) != 1:
+        return ""
+
+    event = compacted[0]
+    if not _event_is_input_like(event):
+        return ""
+    return _event_selector(event)
 
 
 def _action_value_is_docgen_safe(value: Any) -> bool:
@@ -546,6 +544,9 @@ class ManualSegmentRecorder:
             self._pending_updated_at = time.monotonic()
             return self._active
 
+    async def publish_pending_events(self) -> list[dict[str, Any]]:
+        return await self.flush_current_state(force_pending=True)
+
     async def flush_current_state(self, *, force_pending: bool = False) -> list[dict[str, Any]]:
         async with self._lock:
             if self._rewinding:
@@ -558,7 +559,16 @@ class ManualSegmentRecorder:
             source_index = self._current_state_idx
             source_snapshot = self._states[source_index]
             changed = next_hash != source_snapshot.state.state_hash
+            pending_age = time.monotonic() - self._pending_updated_at
             if changed and not self._pending_events and not force_pending and self._waiting_for_dom_event():
+                return []
+            if (
+                changed
+                and self._pending_events
+                and not force_pending
+                and pending_age < PENDING_EVENT_FLUSH_SECONDS
+                and _pending_input_group_selector(self._pending_events)
+            ):
                 return []
             if not changed and not (force_pending and self._pending_events):
                 return []
@@ -794,7 +804,7 @@ class ManualSegmentRecorder:
         source = self._states[source_index].state
         target = self._states[target_index].state
         action_events = _compact_manual_events(events, display_safe=False)
-        display_events = _compact_manual_events(events, display_safe=True)
+        display_events = _compact_manual_events(events, display_safe=False)
         actions = [
             action
             for action in map_steps_to_actions(action_events, fallback_url=target.url or source.url)
@@ -896,7 +906,7 @@ class ManualSegmentRecorder:
         snapshot.events = (
             display_events
             if replacing_focus_click
-            else _compact_manual_events([*snapshot.events, *display_events], display_safe=True)
+            else _compact_manual_events([*snapshot.events, *display_events], display_safe=False)
         )
         snapshot.transition = _build_manual_transition(
             graph_id=self._graph_id,
@@ -1820,6 +1830,7 @@ async def manual_record_session(ctx: dict, session_id: str) -> dict[str, Any]:
                     if message_type in {
                         "browser.input",
                         "flow.start",
+                        "flow.publish_pending",
                         "flow.finish",
                         "flow.rewind",
                         "bug.report",
@@ -1845,6 +1856,27 @@ async def manual_record_session(ctx: dict, session_id: str) -> dict[str, Any]:
                                 **started_payload,
                             },
                         )
+                    elif message_type == "flow.publish_pending":
+                        if not recorder.active:
+                            await _send_ws(ws, send_lock, {"type": "error", "message": "No manual flow is active"})
+                            continue
+                        try:
+                            published_steps = await recorder.publish_pending_events()
+                            for step in published_steps:
+                                await step_queue.put(step)
+                            await ttl.reset()
+                            await _send_ws(
+                                ws,
+                                send_lock,
+                                {
+                                    "type": "flow.pending_published",
+                                    "sessionId": session_id,
+                                    "stepCount": len(published_steps),
+                                    "timestamp": _utc_now(),
+                                },
+                            )
+                        except Exception as exc:
+                            await _send_ws(ws, send_lock, {"type": "error", "message": str(exc)})
                     elif message_type == "flow.finish":
                         try:
                             completed = await recorder.finish_manual_flow()
