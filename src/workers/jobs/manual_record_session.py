@@ -18,7 +18,10 @@ from playwright.async_api import async_playwright
 from src.browser.state import StateManager
 from src.config import config
 from src.crawler.fingerprints import action_key_fingerprint, transition_fingerprint
-from src.crawler.session.manual_crawl.recording_mapper import map_steps_to_actions
+from src.crawler.session.manual_crawl.recording_mapper import (
+    map_steps_to_actions,
+    selector_candidates_for_step,
+)
 from src.crawler.session.sequence_builders import (
     sequence_description,
     sequence_digest,
@@ -247,29 +250,51 @@ def _event_is_input_like(event: dict[str, Any]) -> bool:
 
 
 def _event_selector(event: dict[str, Any]) -> str:
-    candidates: list[str] = []
-    raw_candidates = event.get("selectorCandidates") or event.get("selector_candidates") or []
-    if isinstance(raw_candidates, str):
-        raw_candidates = [raw_candidates]
-    if isinstance(raw_candidates, list):
-        for candidate in raw_candidates:
-            selector = str(candidate or "").strip()
-            if selector and selector not in candidates:
-                candidates.append(selector)
-
-    for key in (
-        "interactiveSelector",
-        "interactive_selector",
-        "element",
-        "selector",
-        "targetSelector",
-        "target_selector",
-    ):
-        selector = str(event.get(key) or "").strip()
-        if selector and selector not in candidates:
-            candidates.append(selector)
-
+    candidates = selector_candidates_for_step(event)
     return candidates[0] if candidates else ""
+
+
+def _event_is_browser_support_probe(event: dict[str, Any]) -> bool:
+    values = [
+        event.get("selector"),
+        event.get("element"),
+        event.get("interactiveSelector"),
+        event.get("targetSelector"),
+        event.get("id"),
+        event.get("elementId"),
+        event.get("name"),
+        event.get("label"),
+        event.get("accessibleName"),
+        event.get("targetAccessibleName"),
+    ]
+    identity = " ".join(str(value or "") for value in values).lower()
+    return any(
+        marker in identity
+        for marker in (
+            "webauthn-support",
+            "webauthn-iuvpaa-support",
+            "javascript-support",
+        )
+    )
+
+
+def _event_is_ignored(event: dict[str, Any]) -> bool:
+    if event.get("isTrusted") is False:
+        return True
+
+    if not _event_is_input_like(event):
+        return False
+
+    input_type = str(event.get("inputType") or event.get("input_type") or "").lower()
+    if input_type == "hidden" or event.get("hidden") is True:
+        return True
+    if event.get("editable") is False and input_type not in {
+        "checkbox",
+        "radio",
+        "select",
+    }:
+        return True
+    return _event_is_browser_support_probe(event)
 
 
 def _log_event_summary(event: dict[str, Any]) -> dict[str, Any]:
@@ -299,6 +324,9 @@ def _compact_manual_events(
 ) -> list[dict[str, Any]]:
     compacted: list[dict[str, Any]] = []
     for event in events:
+        if _event_is_ignored(event):
+            continue
+
         next_event = dict(event)
         action = _event_action(next_event)
         selector = _event_selector(next_event)
@@ -363,23 +391,13 @@ def _transition_is_docgen_safe(transition: AbstractTransition) -> bool:
 
 
 def _action_selector_candidates(action: CrawlAction) -> list[str]:
-    candidates: list[str] = []
-
     metadata = action.metadata or {}
-    raw_candidates = metadata.get("selector_candidates") or []
-    if isinstance(raw_candidates, str):
-        raw_candidates = [raw_candidates]
-    if isinstance(raw_candidates, list):
-        for candidate in raw_candidates:
-            selector = str(candidate or "").strip()
-            if selector and selector not in candidates:
-                candidates.append(selector)
-
-    selector = str(action.selector or "").strip()
-    if selector and selector not in candidates:
-        candidates.append(selector)
-
-    return candidates
+    return selector_candidates_for_step(
+        {
+            "selector_candidates": metadata.get("selector_candidates") or [],
+            "selector": action.selector,
+        }
+    )
 
 
 def _copy_action_with_selector(action: CrawlAction, selector: str) -> CrawlAction:
@@ -486,7 +504,7 @@ class ManualSegmentRecorder:
         if (time.monotonic() - self._pending_updated_at) < PENDING_EVENT_FLUSH_SECONDS:
             return False
 
-        flushable_actions = {"input", "change", "hover"}
+        flushable_actions = {"input", "change", "hover", "keypress"}
         return all(
             str(event.get("action") or "") in flushable_actions
             for event in self._pending_events
@@ -540,6 +558,8 @@ class ManualSegmentRecorder:
 
     async def record_event(self, event: dict[str, Any]) -> bool:
         async with self._lock:
+            if _event_is_ignored(event):
+                return False
             self._pending_events.append(event)
             self._pending_updated_at = time.monotonic()
             return self._active
@@ -719,7 +739,14 @@ class ManualSegmentRecorder:
                 "removedStepIds": removed_step_ids,
             }
 
-    async def commit_rewind(self, plan: dict[str, Any], page: Any) -> dict[str, Any]:
+    async def commit_rewind(
+        self,
+        plan: dict[str, Any],
+        page: Any,
+        replay_snapshot: ManualStateSnapshot,
+        *,
+        state_matched: bool,
+    ) -> dict[str, Any]:
         async with self._lock:
             if not self._active or self._segment_start_state_idx is None:
                 raise RuntimeError("No manual flow is active")
@@ -729,13 +756,40 @@ class ManualSegmentRecorder:
             cut_transition_idx = self._segment_start_transition_idx + keep_count
             self._transitions = self._transitions[:cut_transition_idx]
             self._states = self._states[: target_state_idx + 1]
-            self._current_state_idx = target_state_idx
+
+            target_state = self._states[target_state_idx].state
+            if replay_snapshot.state.state_hash == target_state.state_hash:
+                self._states[target_state_idx] = replay_snapshot
+                replay_state_idx = target_state_idx
+            else:
+                self._states.append(replay_snapshot)
+                replay_state_idx = len(self._states) - 1
+
+            if keep_count > 0 and self._transitions:
+                transition_index = cut_transition_idx - 1
+                snapshot = self._transitions[transition_index]
+                source = self._states[snapshot.source_index].state
+                snapshot.target_index = replay_state_idx
+                snapshot.transition = _build_manual_transition(
+                    graph_id=self._graph_id,
+                    session_id=self._session_id,
+                    source=source,
+                    target=replay_snapshot.state,
+                    actions=snapshot.actions,
+                    unique_key=snapshot.step_id,
+                )
+            else:
+                self._segment_start_state_idx = replay_state_idx
+                self._segment_start_transition_idx = cut_transition_idx
+                self._checkpoint_hash = replay_snapshot.state.state_hash
+
+            self._current_state_idx = replay_state_idx
             self._pending_events = []
             self._pending_updated_at = 0.0
             self._page = page
             self._flow_revision += 1
             self._rewinding = False
-            target = self._states[target_state_idx].state
+            target = replay_snapshot.state
             steps = [
                 self._step_payload(snapshot, index)
                 for index, snapshot in self._active_transition_entries()
@@ -744,6 +798,9 @@ class ManualSegmentRecorder:
                 "sessionId": self._session_id,
                 "checkpointHash": self._checkpoint_hash,
                 "stateHash": target.state_hash,
+                "actualStateHash": target.state_hash,
+                "expectedStateHash": plan.get("expectedStateHash") or "",
+                "stateMatched": bool(state_matched),
                 "pageUrl": target.url,
                 "title": target.title,
                 "flowRevision": self._flow_revision,
@@ -1595,7 +1652,7 @@ async def _replay_manual_path(
     session_id: str,
     event_queue: asyncio.Queue[dict[str, Any]],
     plan: dict[str, Any],
-) -> tuple[Any, Any]:
+) -> tuple[Any, Any, ManualStateSnapshot, bool]:
     context_kwargs: dict[str, Any] = {
         "viewport": {"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT},
         "device_scale_factor": 1,
@@ -1615,12 +1672,15 @@ async def _replay_manual_path(
         for action in plan.get("actions") or []:
             await _execute_replay_action(new_page, action, job)
 
-        state_hash = StateManager.hash_content(str(await new_page.evaluate(STATE_HASH_SCRIPT)))
-        if state_hash != plan.get("expectedStateHash"):
-            raise RuntimeError("Replay did not reach the selected step")
+        state = await _capture_manual_state(new_page, job)
+        replay_snapshot = ManualStateSnapshot(
+            state=state,
+            storage_state=await new_context.storage_state(),
+        )
+        state_matched = state.state_hash == str(plan.get("expectedStateHash") or "")
 
         await _install_dom_recorder(new_context, session_id, event_queue, pages=[new_page])
-        return new_context, new_page
+        return new_context, new_page, replay_snapshot, state_matched
     except Exception:
         try:
             await new_context.close()
@@ -1891,18 +1951,62 @@ async def manual_record_session(ctx: dict, session_id: str) -> dict[str, Any]:
                         raw_step_id = rewind_payload.get("stepId") or rewind_payload.get("step_id")
                         step_id = str(raw_step_id) if raw_step_id else None
                         try:
+                            async def send_rewind_progress(
+                                phase: str,
+                                message: str,
+                                **extra: Any,
+                            ) -> None:
+                                await ttl.reset()
+                                await _send_ws(
+                                    ws,
+                                    send_lock,
+                                    {
+                                        "type": "flow.rewind_progress",
+                                        "sessionId": session_id,
+                                        "phase": phase,
+                                        "message": message,
+                                        "timestamp": _utc_now(),
+                                        **extra,
+                                    },
+                                )
+
+                            await send_rewind_progress("preparing", "Preparing replay")
                             plan = await recorder.prepare_rewind(step_id)
                             recorder.begin_rewind()
                             _drain_queue(step_queue)
-                            new_context, new_page = await _replay_manual_path(
+                            await send_rewind_progress(
+                                "replaying",
+                                "Replaying selected actions",
+                                actionCount=len(plan.get("actions") or []),
+                                expectedStateHash=plan.get("expectedStateHash") or "",
+                            )
+                            (
+                                new_context,
+                                new_page,
+                                replay_snapshot,
+                                state_matched,
+                            ) = await _replay_manual_path(
                                 browser,
                                 job,
                                 session_id,
                                 event_queue,
                                 plan,
                             )
+                            await send_rewind_progress(
+                                "activating",
+                                "Activating replayed page",
+                                actualStateHash=replay_snapshot.state.state_hash,
+                                expectedStateHash=plan.get("expectedStateHash") or "",
+                                stateMatched=state_matched,
+                            )
                             await activate_replayed_page(new_context, new_page)
-                            rewound = await recorder.commit_rewind(plan, page)
+                            await send_rewind_progress("committing", "Committing replayed state")
+                            rewound = await recorder.commit_rewind(
+                                plan,
+                                page,
+                                replay_snapshot,
+                                state_matched=state_matched,
+                            )
                             _drain_queue(step_queue)
                             await ttl.reset()
                             await _send_ws(ws, send_lock, {"type": "flow.rewound", **rewound})

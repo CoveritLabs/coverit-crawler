@@ -78,9 +78,7 @@ async def shutdown(ctx: dict) -> None:
 
 
 class WorkerSettings:
-    redis_settings = _redis_settings_from_url(
-        config.REDIS_URL or "redis://localhost:6379/0"
-    )
+    redis_settings = _redis_settings_from_url(config.REDIS_URL)
     queue_name = config.ARQ_QUEUE_NAME
     functions = [crawl_session]
     on_startup = startup
